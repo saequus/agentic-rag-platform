@@ -70,7 +70,27 @@ class XAIProvider:
             raise ProviderError("XAI_API_KEY is not set")
         self.model = model
         self.temperature = temperature
-        self._client = AsyncClient(api_key=api_key, api_host=api_host, timeout=timeout)
+        self._api_key = api_key
+        self._api_host = api_host
+        self._timeout = timeout
+        # Opened on first ``complete``. See ``_client_on_running_loop``.
+        self._client: AsyncClient | None = None
+
+    def _client_on_running_loop(self) -> AsyncClient:
+        """Create the gRPC channel on the thread that is running the loop.
+
+        ``grpc.aio.secure_channel`` calls ``asyncio.get_event_loop()``. Python
+        3.12 raises when that thread has no running loop. FastAPI runs sync
+        dependencies on an AnyIO worker thread, so constructing ``AsyncClient``
+        in ``__init__`` (via ``provider_dep``) fails before any RPC.
+        """
+        if self._client is None:
+            self._client = AsyncClient(
+                api_key=self._api_key,
+                api_host=self._api_host,
+                timeout=self._timeout,
+            )
+        return self._client
 
     async def complete(
         self,
@@ -84,7 +104,7 @@ class XAIProvider:
         kwargs: dict[str, Any] = {"model": self.model, "temperature": temp}
         if tools:
             kwargs["tools"] = [_to_xai_tool(spec) for spec in tools]
-        chat = self._client.chat.create(**kwargs)
+        chat = self._client_on_running_loop().chat.create(**kwargs)
         for message in messages:
             chat.append(_to_xai_message(message))
 
