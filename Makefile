@@ -1,4 +1,4 @@
-.PHONY: dev lint test smoke compose-up compose-down install hooks
+.PHONY: dev lint test smoke compose-up compose-down install hooks db-init download ingest bench
 
 install:
 	uv sync --dev
@@ -26,3 +26,15 @@ compose-up:
 
 compose-down:
 	docker compose down
+
+db-init:
+	uv run python -m agentic_rag_platform.ingest.migrate
+
+download:
+	uv run python scripts/download_corpus.py
+
+ingest: download
+	uv run python -m agentic_rag_platform.ingest.cli
+
+bench:
+	uv run python scripts/bench.py

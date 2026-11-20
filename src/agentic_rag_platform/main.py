@@ -1,4 +1,8 @@
-"""FastAPI gateway. Day 1 exposes ``GET /health`` and ``POST /chat``."""
+"""FastAPI gateway.
+
+Day 1: ``GET /health`` and ``POST /chat``.
+Day 2: ``POST /ingest`` and ``POST /search``.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agentic_rag_platform import __version__
 from agentic_rag_platform.agent.loop import run_agent
+from agentic_rag_platform.ingest.routes import router as ingest_router
 from agentic_rag_platform.providers.base import LLMProvider, ProviderError
 from agentic_rag_platform.providers.factory import get_provider
 from agentic_rag_platform.schemas import (
@@ -23,9 +28,9 @@ app = FastAPI(
     title="agentic-rag-platform",
     version=__version__,
     description=(
-        "On-prem-capable agentic RAG platform. Day 1 is the LLM gateway: "
-        "a provider-agnostic tool-calling loop with structured outputs, "
-        "defaulting to xAI Grok."
+        "On-prem-capable agentic RAG platform. Day 1 is the LLM gateway "
+        "(tool-calling loop, structured outputs, default xAI Grok). "
+        "Day 2 adds PDF ingestion, embeddings and pgvector search."
     ),
 )
 
@@ -35,6 +40,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(ingest_router)
 
 
 def settings_dep() -> Settings:

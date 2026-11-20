@@ -7,6 +7,8 @@ from collections.abc import Callable, Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from agentic_rag_platform.ingest.embedder import HashEmbedder
+from agentic_rag_platform.ingest.routes import embedder_dep
 from agentic_rag_platform.main import app, provider_dep
 from agentic_rag_platform.settings import get_settings
 
@@ -14,6 +16,7 @@ from agentic_rag_platform.settings import get_settings
 @pytest.fixture(autouse=True)
 def clear_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
+    app.dependency_overrides[embedder_dep] = lambda: HashEmbedder()
     yield
     get_settings.cache_clear()
     app.dependency_overrides.clear()
