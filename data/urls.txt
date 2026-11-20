@@ -1,0 +1,41 @@
+# Public finance corpus for Day 2 ingestion.
+# Format: <url><TAB><local filename>
+# Every URL below was downloaded on 2026-11-20 and checked for a %PDF magic
+# byte and an application/pdf content type.
+#
+# NBP Inflation Reports are intentionally omitted from this committed list:
+# nbp.pl served an Imperva “Pardon Our Interruption” challenge from the
+# build network, so those official URLs could not be verified here. You can
+# add them later (see docs/retrieval-notes.md).
+
+# ---------------------------------------------------------------------------
+# ECB Economic Bulletin (https://www.ecb.europa.eu/pub/economic-bulletin/)
+# ---------------------------------------------------------------------------
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202407.en.pdf	ecb-eb202407.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202408.en.pdf	ecb-eb202408.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202501.en.pdf	ecb-eb202501.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202503.en.pdf	ecb-eb202503.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202505.en.pdf	ecb-eb202505.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202507.en.pdf	ecb-eb202507.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202508.en.pdf	ecb-eb202508.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202601.en.pdf	ecb-eb202601.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202603.en.pdf	ecb-eb202603.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202605.en.pdf	ecb-eb202605.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202606.en.pdf	ecb-eb202606.en.pdf
+https://www.ecb.europa.eu/pub/pdf/ecbu/eb202607.en.pdf	ecb-eb202607.en.pdf
+
+# ---------------------------------------------------------------------------
+# Polish retail Treasury bond issue letters (Ministerstwo Finansów)
+# Hosted at https://www.obligacjeskarbowe.pl/
+# ---------------------------------------------------------------------------
+https://www.obligacjeskarbowe.pl/media_files/9eb30d6e-2e51-4ab8-93d5-d1927deedd63.pdf	pl-bond-ots-103-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/bef80728-48d7-4005-b698-21356047664f.pdf	pl-bond-ror-104-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/71e38714-2d4e-47cd-998e-69e6d7227802.pdf	pl-bond-dor-105-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/3cfa4725-1f7f-4181-b475-92a277ebc849.pdf	pl-bond-tos-106-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/f4c9c836-0174-4846-8b4a-c758a460f492.pdf	pl-bond-coi-107-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/25f35d9b-0ea3-4cb9-b3c2-cd9200473a57.pdf	pl-bond-edo-108-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/979d708a-899c-4f3c-93bf-b68f7419a6b5.pdf	pl-bond-rod-110-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/c15a26ae-de6e-4b89-a137-cb16687a7b0a.pdf	pl-bond-tos-97-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/e156037b-5b0c-40b8-85e1-0b205d4ac395.pdf	pl-bond-coi-98-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/4f5f6353-fdcd-4b7e-b44f-63088098c534.pdf	pl-bond-edo-99-2026.pdf
+https://www.obligacjeskarbowe.pl/media_files/f41a32e4-f893-4ffe-ac9c-1bc8464d122d.pdf	pl-bond-premium-21-2022.pdf
