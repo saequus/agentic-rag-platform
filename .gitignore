@@ -30,3 +30,11 @@ htmlcov/
 
 # Docker
 pgdata/
+
+# Downloaded corpus (PDFs) — never commit
+data/raw/
+*.part
+
+# Local model / Hugging Face caches if someone sets them inside the repo
+.cache/
+data/models/

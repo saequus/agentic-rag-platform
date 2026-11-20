@@ -10,6 +10,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProviderName = Literal["xai", "openai", "anthropic"]
+EmbeddingProvider = Literal["local", "openai", "hash"]
 
 DEFAULT_XAI_REST_BASE = "https://api.x.ai/v1"
 DEFAULT_XAI_GRPC_HOST = "api.x.ai"
@@ -48,7 +49,17 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     tool_http_timeout_seconds: float = Field(default=8.0, gt=0)
 
-    database_url: str = "postgresql://rag:rag@localhost:5432/rag"
+    database_url: str = "postgresql://slava@localhost:5432/agentic_rag"
+
+    # Day 2 embeddings. "local" is a SentenceTransformer (default: multilingual-e5-base).
+    # "openai" uses text-embedding-3-small and requires OPENAI_API_KEY.
+    # "hash" is a deterministic unit-vector backend for tests / index micro-benchmarks.
+    embedding_provider: EmbeddingProvider = "local"
+    embedding_model: str = "intfloat/multilingual-e5-base"
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_batch_size: int = Field(default=16, ge=1, le=256)
+    default_tenant_id: str = "default"
+    hnsw_ef_search: int = Field(default=40, ge=1, le=800)
 
     @property
     def model_name(self) -> str:

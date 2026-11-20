@@ -13,8 +13,13 @@ dependencies = [
     "fastapi>=0.165.0",
     "httpx>=0.28.1",
     "openai>=3.56.0",
+    "pgvector>=0.5.1",
+    "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
+    "pypdf>=7.1.1",
+    "sentence-transformers>=6.3.0",
+    "tiktoken>=0.14.0",
     "uvicorn[standard]>=0.54.0",
     "xai-sdk>=1.21.0",
 ]
@@ -59,11 +64,23 @@ module = ["xai_sdk.*"]
 # xai-sdk ships types; keep this override only if a submodule is untyped.
 follow_untyped_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+    "sentence_transformers",
+    "sentence_transformers.*",
+    "pgvector",
+    "pgvector.*",
+]
+follow_untyped_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+markers = [
+    "integration: needs a live Postgres with pgvector; skipped unless DATABASE_URL is set",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
