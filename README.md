@@ -14,19 +14,29 @@ Default LLM provider is **xAI Grok** via the official [`xai-sdk`](https://pypi.o
 and structured-output APIs can be learned and compared — see
 [docs/learning-notes.md](docs/learning-notes.md).
 
-## What works today (Day 1)
+## What works today (Days 1–2)
 
-- FastAPI app with `GET /health` and `POST /chat`
+- FastAPI app with `GET /health`, `POST /chat`, `POST /ingest`, `POST /search`
 - Provider interface (`Protocol`) with **xAI as default**, plus OpenAI and
   Anthropic official-SDK adapters, selected by `LLM_PROVIDER`
 - Tool-calling loop with a `get_fx_rate(base, quote)` tool (NBP API, Frankfurter
   fallback, timeouts, structured errors)
 - Structured output `Answer{answer, citations, confidence}` validated with Pydantic
 - Settings via `pydantic-settings`, `.env` / `.env.example`
+- Day 2 ingestion: pypdf → structure-aware chunker (512–800 tokens, ~12%
+  overlap, section metadata, content hash) → embeddings → Postgres + pgvector
+  with an HNSW index (`vector_cosine_ops`, `m=16`, `ef_construction=64`)
+- Default embedder is the local multilingual model
+  `intfloat/multilingual-e5-base` (e5 `query:` / `passage:` prefixes,
+  L2-normalised). `BAAI/bge-m3` is an option; OpenAI
+  `text-embedding-3-small` is used only when `OPENAI_API_KEY` is set.
 - `docker-compose` (api + Postgres/pgvector; Langfuse stub commented for Day 6)
 - Multi-stage, non-root `Dockerfile` built with `uv`
-- pre-commit (ruff, mypy), pytest, GitHub Actions CI (no real API calls)
+- pre-commit (ruff, mypy), pytest, GitHub Actions CI (no real API calls;
+  integration tests that need Postgres are skipped unless `DATABASE_URL` is set)
 - `make smoke` — optional live call to xAI when `XAI_API_KEY` is set
+- `make db-init`, `make ingest`, `make bench` — schema, corpus ingest, HNSW vs
+  exact-search numbers in [docs/retrieval-notes.md](docs/retrieval-notes.md)
 
 ## Planned architecture
 
@@ -60,9 +70,9 @@ flowchart TB
     DEP -.-> GW
 ```
 
-Day 1 is the **LLM gateway** slice: provider adapters, the tool loop, and the
-HTTP API. Retrieval, MCP, tracing, evals, local inference and Kubernetes land
-on later days.
+Days 1–2 are the **LLM gateway** plus the **ingestion / pgvector** slice.
+Hybrid search, MCP, tracing, evals, local inference and Kubernetes land on
+later days.
 
 ## Quickstart
 
@@ -117,8 +127,10 @@ docker compose up --build
 curl -s http://127.0.0.1:8000/health
 ```
 
-Postgres with pgvector is started for Day 2 ingestion. The Day 1 API does not
-query it yet. A Langfuse service is left commented in `docker-compose.yml`.
+Postgres with pgvector is included for ingestion. After the first
+`docker compose up`, run `DATABASE_URL=postgresql://rag:rag@localhost:5432/rag make db-init`
+against the published port (or rely on a local Postgres.app database — see
+below). A Langfuse service is left commented in `docker-compose.yml`.
 
 ### Tests and live smoke
 
@@ -127,6 +139,45 @@ make lint          # ruff + mypy
 make test          # unit tests, all HTTP/LLM calls mocked
 make smoke         # real xAI call; requires XAI_API_KEY; not run in CI
 ```
+
+Integration tests for pgvector run only when `DATABASE_URL` is set
+(`pytest -m integration`). CI does not set it, so those tests are skipped.
+
+### Day 2: ingest and search (local Postgres.app)
+
+The default `DATABASE_URL` in `.env.example` is
+`postgresql://slava@localhost:5432/agentic_rag` — the database already
+created on the development Mac (Postgres.app 18, trust auth, pgvector
+0.8.7 enabled). From a fresh clone:
+
+```bash
+git pull
+uv sync --dev
+cp .env.example .env          # already points at agentic_rag; add XAI_API_KEY if you want /chat
+make db-init                  # extension, tables, HNSW index
+make ingest                   # downloads 23 public PDFs into data/raw (gitignored), then embeds
+make bench                    # 50 queries, HNSW vs exact search, updates docs/retrieval-notes.md
+```
+
+The first `make ingest` also downloads `intfloat/multilingual-e5-base`
+(~1 GB) from Hugging Face. To compare with OpenAI embeddings, set
+`EMBEDDING_PROVIDER=openai` and `OPENAI_API_KEY`, then re-run
+`make db-init` against an empty database (the vector dimension is 1536
+instead of 768) and `make ingest` again.
+
+Search via the API (after `make dev` or `uv run fastapi dev ...`):
+
+```bash
+curl -s http://127.0.0.1:8000/search \
+  -H 'content-type: application/json' \
+  -d '{"query":"ECB interest rate decision and the 2% inflation target","k":5}' | jq
+```
+
+The committed corpus is 12 ECB Economic Bulletins and 11 official Polish
+retail Treasury bond issue letters. NBP inflation reports are documented
+in [docs/retrieval-notes.md](docs/retrieval-notes.md) but are not in
+`data/urls.txt`, because nbp.pl served a bot challenge from the network
+used to verify the URLs.
 
 CI on `main` and on pull requests runs ruff, mypy and pytest only. No secrets
 are required and no provider APIs are contacted.
@@ -153,21 +204,27 @@ LLM_PROVIDER=anthropic      ANTHROPIC_API_KEY=...  ANTHROPIC_MODEL=claude-sonnet
 
 ```
 src/agentic_rag_platform/
-  main.py                 FastAPI app: /health, /chat
+  main.py                 FastAPI app: /health, /chat, /ingest, /search
   settings.py             pydantic-settings
   schemas.py              Answer, ChatRequest, Message, ToolCall
   providers/              xAI (default), OpenAI, Anthropic + factory
   tools/                  get_fx_rate + registry
   agent/loop.py           tool loop + structured final answer
-tests/                    mocked unit tests
+  ingest/                 Day 2: PDF load, chunker, embedders, pgvector store
+migrations/001_init.sql   documents + chunks + HNSW index
+data/urls.txt             verified public PDF list (files themselves gitignored)
+tests/                    mocked unit tests + optional pgvector integration tests
 scripts/smoke.py          optional live xAI check
+scripts/download_corpus.py
+scripts/bench.py          HNSW vs exact search → docs/retrieval-notes.md
 docs/learning-notes.md    vendor API comparison with doc links
+docs/retrieval-notes.md   chunking, embeddings, xAI embeddings check, bench numbers
 ```
 
 ## Roadmap (20 weekdays, 19 Nov – 16 Dec 2026)
 
 - [x] **Day 1** — LLM gateway, provider interface, tool calling, structured output, CI
-- [ ] **Day 2** — Ingestion, chunking, embeddings, pgvector
+- [x] **Day 2** — Ingestion, chunking, embeddings, pgvector
 - [ ] **Day 3** — Hybrid search, Qdrant, reranking
 - [ ] **Day 4** — LangGraph agents (LangChain / LlamaIndex / Pydantic AI trade-offs)
 - [ ] **Day 5** — MCP server and client
