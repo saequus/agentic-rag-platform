@@ -66,6 +66,35 @@ def ingest_paths(
     embedder: Embedder,
     doc_id: str | None = None,
 ) -> IngestSummary:
+    """Load PDFs into the database so they can be searched later.
+
+    Each path in ``sources`` is one PDF file. For every file this function:
+
+    1. Reads the text out of the PDF.
+    2. Picks an id for the document. If you pass ``doc_id``, that id is used,
+       but only when there is exactly one file. Otherwise the id is the file
+       name without ``.pdf``.
+    3. Splits the text into smaller pieces called chunks.
+    4. Saves (or updates) one row that describes the whole document.
+    5. Looks up chunks already stored for that document. A chunk is sent to
+       the embedder only when it is new, its text changed, or a different
+       embedding model is in use. Unchanged chunks keep the vector they
+       already have, which avoids paying to embed the same text again.
+    6. Saves every chunk. Chunks past the end of the new text are deleted,
+       so a shorter re-ingest does not leave old pieces behind.
+    7. Commits that document before moving on to the next file.
+
+    ``tenant_id`` keeps one customer's documents separate from another's.
+    ``database_url`` is the Postgres connection string. ``embedder`` turns
+    chunk text into the numeric vectors used for search.
+
+    Returns a summary with, for each document, how many pages and chunks it
+    had, how many chunks were embedded, how many were skipped, and how many
+    old chunks were deleted.
+
+    Raises ``ValueError`` if ``doc_id`` is set while ``sources`` has more
+    than one file.
+    """
     if doc_id is not None and len(sources) != 1:
         raise ValueError("doc_id can only be set when ingesting a single file")
 

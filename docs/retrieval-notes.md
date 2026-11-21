@@ -169,13 +169,13 @@ excerpts taken from the stored corpus (see `scripts/bench.py`).
 
 <!-- BENCH:START -->
 
-_Measured 2026-11-20 23:23 Europe/Warsaw. Embedder `intfloat/multilingual-e5-base` (dim=768), tenant `default`, 9104 chunks, 50 queries, recall@10. Host: Intel(R) Xeon(R) Processor, 15.6 GiB RAM._
+_Measured 2026-11-21 12:00 Europe/Warsaw. Embedder `intfloat/multilingual-e5-base` (dim=768), tenant `default`, 9104 chunks, 50 queries, recall@10. Host: unknown CPU._
 
 | ef_search | recall@10 | HNSW latency | Exact (seq scan) latency |
 | ---: | ---: | --- | --- |
-| 16 | 1.000 | mean 89.45 ms · p50 88.36 · p95 98.40 | mean 79.30 ms · p50 85.30 · p95 91.89 |
-| 40 | 1.000 | mean 88.92 ms · p50 87.37 · p95 100.07 | mean 79.30 ms · p50 85.30 · p95 91.89 |
-| 80 | 1.000 | mean 89.18 ms · p50 87.14 · p95 99.75 | mean 79.30 ms · p50 85.30 · p95 91.89 |
+| 16 | 0.742 | mean 2.33 ms · p50 2.29 · p95 3.03 | mean 28.42 ms · p50 27.88 · p95 29.30 |
+| 40 | 0.916 | mean 2.90 ms · p50 2.83 · p95 3.31 | mean 28.42 ms · p50 27.88 · p95 29.30 |
+| 80 | 1.000 | mean 28.19 ms · p50 27.68 · p95 28.89 | mean 28.42 ms · p50 27.88 · p95 29.30 |
 
 Notes:
 - 10 written queries, 40 excerpts taken from stored chunks (seed=7).
