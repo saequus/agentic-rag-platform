@@ -1,0 +1,845 @@
+{
+  "info": {
+    "_postman_id": "a7c4e2b1-6d8f-4c91-9e3a-2b5d8f01c4a6",
+    "name": "agentic-rag-platform",
+    "description": "Example requests for the local [agentic-rag-platform](https://github.com/saequus/agentic-rag-platform) API.\n\nStart the API from the repo root:\n\n    uv run fastapi dev src/agentic_rag_platform/main.py --port 8000\n\nInteractive OpenAPI docs: [http://localhost:8000/docs](http://localhost:8000/docs)\n\nMachine-readable OpenAPI schema: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)\n\nSelect the **local** environment (`baseUrl=http://localhost:8000`, `tenantId=default`). Collection variables have the same defaults and also define `corpusPath` and `samplePdfPath`.\n\nEndpoints covered: `GET /health`, `POST /chat`, `POST /ingest`, `POST /search`.\n\nNotes:\n\n- There is no request-body field to override the LLM provider. The running process uses `LLM_PROVIDER` from `.env` (`xai` by default, or `openai` / `anthropic`). Restart the API after changing it.\n- Search uses `k` (1–100), not `top_k`. Tenant scoping is `tenant_id`.\n- `POST /ingest` resolves `source_path` on the API host. The \"Ingest corpus\" request embeds every PDF under `data/raw` and can take several minutes — prefer the single-file request unless you intend a full ingest.\n- Example responses are illustrative (from unit tests and the README), not live captures.\n",
+    "schema": "https://schema.postman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: status, provider, model', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('status', 'ok');",
+                  "  pm.expect(body).to.have.property('provider').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('model').that.is.a('string');",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness check. Returns the configured LLM provider and model name."
+          },
+          "response": [
+            {
+              "name": "Example 200",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
+                },
+                "description": "Liveness check. Returns the configured LLM provider and model name."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"ok\",\n  \"provider\": \"xai\",\n  \"model\": \"grok-4.7\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "description": "Structured chat via `POST /chat`. The body is `{ message, history? }`. Provider override is not supported on the request; use `LLM_PROVIDER`.",
+      "item": [
+        {
+          "name": "Plain question",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: structured Answer plus provider metadata', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('answer').that.is.a('string').and.to.have.lengthOf.at.least(1);",
+                  "  pm.expect(body).to.have.property('citations').that.is.an('array');",
+                  "  pm.expect(body).to.have.property('confidence').that.is.a('number');",
+                  "  pm.expect(body.confidence).to.be.at.least(0).and.to.be.at.most(1);",
+                  "  pm.expect(body).to.have.property('provider').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('model').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('tool_calls').that.is.an('array');",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the capital of Poland?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "A plain question that should not need a tool. The response is a structured `Answer` (`answer`, `citations`, `confidence`) plus `provider`, `model`, and `tool_calls`."
+          },
+          "response": [
+            {
+              "name": "Example 200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"What is the capital of Poland?\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/chat",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chat"
+                  ]
+                },
+                "description": "A plain question that should not need a tool. The response is a structured `Answer` (`answer`, `citations`, `confidence`) plus `provider`, `model`, and `tool_calls`."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"answer\": \"Warsaw is the capital of Poland.\",\n  \"citations\": [],\n  \"confidence\": 0.85,\n  \"provider\": \"xai\",\n  \"model\": \"grok-4.7\",\n  \"tool_calls\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "FX tool-calling question (EUR/PLN, NBP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: structured Answer plus provider metadata', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('answer').that.is.a('string').and.to.have.lengthOf.at.least(1);",
+                  "  pm.expect(body).to.have.property('citations').that.is.an('array');",
+                  "  pm.expect(body).to.have.property('confidence').that.is.a('number');",
+                  "  pm.expect(body.confidence).to.be.at.least(0).and.to.be.at.most(1);",
+                  "  pm.expect(body).to.have.property('provider').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('model').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('tool_calls').that.is.an('array');",
+                  "});",
+                  "",
+                  "pm.test('FX tool was considered (soft check)', function () {",
+                  "  const body = pm.response.json();",
+                  "  // The model usually calls get_fx_rate, but this is not guaranteed.",
+                  "  if (body.tool_calls.length > 0) {",
+                  "    const names = body.tool_calls.map(function (call) { return call.name; });",
+                  "    pm.expect(names).to.include('get_fx_rate');",
+                  "    const fx = body.tool_calls.find(function (call) { return call.name === 'get_fx_rate'; });",
+                  "    pm.expect(fx).to.have.property('arguments');",
+                  "    pm.expect(fx).to.have.property('result').that.is.a('string');",
+                  "  }",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the EUR/PLN rate today per NBP?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Prompts the agent to call the `get_fx_rate` tool (NBP mid rate, Frankfurter fallback). Expect `tool_calls` to include `get_fx_rate` with `base=EUR` and `quote=PLN` when the model cooperates."
+          },
+          "response": [
+            {
+              "name": "Example 200 with get_fx_rate",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"What is the EUR/PLN rate today per NBP?\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/chat",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chat"
+                  ]
+                },
+                "description": "Prompts the agent to call the `get_fx_rate` tool (NBP mid rate, Frankfurter fallback). Expect `tool_calls` to include `get_fx_rate` with `base=EUR` and `quote=PLN` when the model cooperates."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"answer\": \"1 EUR is 4.3 PLN at the NBP mid rate published on 2026-11-19.\",\n  \"citations\": [\n    \"https://api.nbp.pl/api/exchangerates/rates/a/eur/?format=json\"\n  ],\n  \"confidence\": 0.9,\n  \"provider\": \"xai\",\n  \"model\": \"grok-4.7\",\n  \"tool_calls\": [\n    {\n      \"id\": \"t1\",\n      \"name\": \"get_fx_rate\",\n      \"arguments\": {\n        \"base\": \"EUR\",\n        \"quote\": \"PLN\"\n      },\n      \"result\": \"{\\\"base\\\": \\\"EUR\\\", \\\"quote\\\": \\\"PLN\\\", \\\"rate\\\": 4.3, \\\"source\\\": \\\"NBP\\\", \\\"as_of\\\": \\\"2026-11-19\\\"}\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Question with conversation history",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: structured Answer plus provider metadata', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('answer').that.is.a('string').and.to.have.lengthOf.at.least(1);",
+                  "  pm.expect(body).to.have.property('citations').that.is.an('array');",
+                  "  pm.expect(body).to.have.property('confidence').that.is.a('number');",
+                  "  pm.expect(body.confidence).to.be.at.least(0).and.to.be.at.most(1);",
+                  "  pm.expect(body).to.have.property('provider').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('model').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('tool_calls').that.is.an('array');",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"And what is the mid rate of 1 USD in PLN today? Cite your source.\",\n  \"history\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Give me a one-sentence briefing on EUR/PLN.\"\n    },\n    {\n      \"role\": \"assistant\",\n      \"content\": \"I can look up the official NBP mid rate for you.\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Same `/chat` endpoint with optional `history` turns (`user` / `assistant` / `system`). There is no request-body field to override the LLM provider; set `LLM_PROVIDER` (xai, openai, or anthropic) in `.env` and restart the API."
+          },
+          "response": [
+            {
+              "name": "Example 200 with get_fx_rate (USD/PLN)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"And what is the mid rate of 1 USD in PLN today? Cite your source.\",\n  \"history\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Give me a one-sentence briefing on EUR/PLN.\"\n    },\n    {\n      \"role\": \"assistant\",\n      \"content\": \"I can look up the official NBP mid rate for you.\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/chat",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chat"
+                  ]
+                },
+                "description": "Same `/chat` endpoint with optional `history` turns (`user` / `assistant` / `system`). There is no request-body field to override the LLM provider; set `LLM_PROVIDER` (xai, openai, or anthropic) in `.env` and restart the API."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"answer\": \"1 USD is 4.25 PLN at the NBP mid rate published on 2026-11-19.\",\n  \"citations\": [\n    \"https://api.nbp.pl/api/exchangerates/rates/a/usd/?format=json\"\n  ],\n  \"confidence\": 0.93,\n  \"provider\": \"xai\",\n  \"model\": \"grok-4.7\",\n  \"tool_calls\": [\n    {\n      \"id\": \"call_1\",\n      \"name\": \"get_fx_rate\",\n      \"arguments\": {\n        \"base\": \"USD\",\n        \"quote\": \"PLN\"\n      },\n      \"result\": \"{\\\"base\\\": \\\"USD\\\", \\\"quote\\\": \\\"PLN\\\", \\\"rate\\\": 4.25, \\\"source\\\": \\\"NBP\\\"}\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ingest",
+      "description": "Lab endpoint: `source_path` is a local file or directory on the API host, not an upload. The full-corpus request is slow; use the single-file request for a quick check.",
+      "item": [
+        {
+          "name": "Ingest corpus (data/raw)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: tenant_id and documents[]', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('tenant_id').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('documents').that.is.an('array');",
+                  "  if (body.documents.length > 0) {",
+                  "    const doc = body.documents[0];",
+                  "    ['doc_id', 'pages', 'chunks', 'embedded', 'skipped', 'deleted'].forEach(function (key) {",
+                  "      pm.expect(doc).to.have.property(key);",
+                  "    });",
+                  "  }",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source_path\": \"{{corpusPath}}\",\n  \"tenant_id\": \"{{tenantId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ingest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ingest"
+              ]
+            },
+            "description": "Ingest every PDF under `source_path` (resolved on the machine running the API). Default `corpusPath` is `data/raw`, relative to the repo root — the usual cwd when you run `uv run fastapi dev src/agentic_rag_platform/main.py --port 8000`. This re-embeds the full Day 2 corpus and can take several minutes; it also loads the local embedding model on first use. Prefer the single-file request unless you intend a full ingest."
+          },
+          "response": [
+            {
+              "name": "Example 200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source_path\": \"{{corpusPath}}\",\n  \"tenant_id\": \"{{tenantId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/ingest",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "ingest"
+                  ]
+                },
+                "description": "Ingest every PDF under `source_path` (resolved on the machine running the API). Default `corpusPath` is `data/raw`, relative to the repo root — the usual cwd when you run `uv run fastapi dev src/agentic_rag_platform/main.py --port 8000`. This re-embeds the full Day 2 corpus and can take several minutes; it also loads the local embedding model on first use. Prefer the single-file request unless you intend a full ingest."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"tenant_id\": \"default\",\n  \"documents\": [\n    {\n      \"doc_id\": \"eb202501\",\n      \"pages\": 12,\n      \"chunks\": 20,\n      \"embedded\": 20,\n      \"skipped\": 0,\n      \"deleted\": 0\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Ingest a single PDF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: tenant_id and documents[]', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('tenant_id').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('documents').that.is.an('array');",
+                  "  if (body.documents.length > 0) {",
+                  "    const doc = body.documents[0];",
+                  "    ['doc_id', 'pages', 'chunks', 'embedded', 'skipped', 'deleted'].forEach(function (key) {",
+                  "      pm.expect(doc).to.have.property(key);",
+                  "    });",
+                  "  }",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source_path\": \"{{samplePdfPath}}\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"doc_id\": \"ecb-eb202601\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ingest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ingest"
+              ]
+            },
+            "description": "`doc_id` is only valid when `source_path` is a single PDF. Default `samplePdfPath` is `data/raw/ecb-eb202601.en.pdf` (an ECB Economic Bulletin already in the Day 2 corpus). Chunks already stored for the same `(tenant_id, doc_id, content_hash)` are skipped."
+          },
+          "response": [
+            {
+              "name": "Example 200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source_path\": \"{{samplePdfPath}}\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"doc_id\": \"ecb-eb202601\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/ingest",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "ingest"
+                  ]
+                },
+                "description": "`doc_id` is only valid when `source_path` is a single PDF. Default `samplePdfPath` is `data/raw/ecb-eb202601.en.pdf` (an ECB Economic Bulletin already in the Day 2 corpus). Chunks already stored for the same `(tenant_id, doc_id, content_hash)` are skipped."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"tenant_id\": \"default\",\n  \"documents\": [\n    {\n      \"doc_id\": \"ecb-eb202601\",\n      \"pages\": 80,\n      \"chunks\": 400,\n      \"embedded\": 400,\n      \"skipped\": 0,\n      \"deleted\": 0\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "description": "Vector search over ingested chunks. Body: `{ query, tenant_id?, k?, ef_search? }`. Requires a previous successful ingest for the given tenant.",
+      "item": [
+        {
+          "name": "Polish query (EDO bond coupon)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: hits[], model, tenant_id', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('hits').that.is.an('array');",
+                  "  pm.expect(body).to.have.property('model').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('tenant_id').that.is.a('string');",
+                  "  if (body.hits.length > 0) {",
+                  "    const hit = body.hits[0];",
+                  "    ['doc_id', 'chunk_no', 'page', 'section', 'text', 'content_hash', 'score'].forEach(function (key) {",
+                  "      pm.expect(hit).to.have.property(key);",
+                  "    });",
+                  "    pm.expect(hit.text).to.be.a('string');",
+                  "    pm.expect(hit.score).to.be.a('number');",
+                  "  }",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Jakie jest oprocentowanie obligacji EDO?\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"k\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ]
+            },
+            "description": "Polish query over Treasury-bond letters. The field is `k` (1–100), not `top_k`. `tenant_id` filters hits to one tenant (default `default`). Optional `ef_search` overrides the HNSW query-time parameter (1–800)."
+          },
+          "response": [
+            {
+              "name": "Example 200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"Jakie jest oprocentowanie obligacji EDO?\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"k\": 5\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/search",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "search"
+                  ]
+                },
+                "description": "Polish query over Treasury-bond letters. The field is `k` (1–100), not `top_k`. `tenant_id` filters hits to one tenant (default `default`). Optional `ef_search` overrides the HNSW query-time parameter (1–800)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"hits\": [\n    {\n      \"doc_id\": \"edo-0334\",\n      \"chunk_no\": 2,\n      \"page\": 1,\n      \"section\": \"Oprocentowanie\",\n      \"text\": \"Oprocentowanie obligacji EDO jest zmienne i ustalane co 12 miesięcy.\",\n      \"content_hash\": \"abc\",\n      \"score\": 0.87\n    }\n  ],\n  \"model\": \"intfloat/multilingual-e5-base\",\n  \"tenant_id\": \"default\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "English query (ECB inflation outlook 2026)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('JSON shape: hits[], model, tenant_id', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('object');",
+                  "  pm.expect(body).to.have.property('hits').that.is.an('array');",
+                  "  pm.expect(body).to.have.property('model').that.is.a('string');",
+                  "  pm.expect(body).to.have.property('tenant_id').that.is.a('string');",
+                  "  if (body.hits.length > 0) {",
+                  "    const hit = body.hits[0];",
+                  "    ['doc_id', 'chunk_no', 'page', 'section', 'text', 'content_hash', 'score'].forEach(function (key) {",
+                  "      pm.expect(hit).to.have.property(key);",
+                  "    });",
+                  "    pm.expect(hit.text).to.be.a('string');",
+                  "    pm.expect(hit.score).to.be.a('number');",
+                  "  }",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"ECB inflation outlook 2026\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"k\": 5,\n  \"ef_search\": 40\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ]
+            },
+            "description": "English query over ECB Economic Bulletins, with a tenant filter, `k=5`, and `ef_search=40` (the service default)."
+          },
+          "response": [
+            {
+              "name": "Example 200",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"ECB inflation outlook 2026\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"k\": 5,\n  \"ef_search\": 40\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/search",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "search"
+                  ]
+                },
+                "description": "English query over ECB Economic Bulletins, with a tenant filter, `k=5`, and `ef_search=40` (the service default)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"hits\": [\n    {\n      \"doc_id\": \"eb202501\",\n      \"chunk_no\": 0,\n      \"page\": 3,\n      \"section\": \"Summary\",\n      \"text\": \"Inflation is close to the 2% target.\",\n      \"content_hash\": \"abc\",\n      \"score\": 0.91\n    }\n  ],\n  \"model\": \"intfloat/multilingual-e5-base\",\n  \"tenant_id\": \"default\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "description": "Local FastAPI dev server (uvicorn on port 8000)."
+    },
+    {
+      "key": "tenantId",
+      "value": "default",
+      "description": "Tenant used by /ingest and /search. Matches DEFAULT_TENANT_ID."
+    },
+    {
+      "key": "corpusPath",
+      "value": "data/raw",
+      "description": "Directory of PDFs, relative to the API process cwd (repo root)."
+    },
+    {
+      "key": "samplePdfPath",
+      "value": "data/raw/ecb-eb202601.en.pdf",
+      "description": "A single ECB bulletin already present in the Day 2 corpus."
+    }
+  ]
+}

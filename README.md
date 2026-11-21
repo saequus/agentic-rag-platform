@@ -119,6 +119,10 @@ Example response shape:
 }
 ```
 
+### Postman
+
+A Collection v2.1 and a `local` environment live in [`postman/`](postman/). In the Postman desktop app: **Import** → choose the files `postman/agentic-rag-platform.postman_collection.json` and `postman/local.postman_environment.json`, then select the **local** environment in the top-right corner (`baseUrl=http://localhost:8000`). Interactive docs are at [http://localhost:8000/docs](http://localhost:8000/docs) (`/openapi.json` for the schema). Do not send **Ingest corpus** unless you want a full re-embed; use **Ingest a single PDF** for a quick check.
+
 ### Docker Compose
 
 ```bash
@@ -219,6 +223,7 @@ scripts/download_corpus.py
 scripts/bench.py          HNSW vs exact search → docs/retrieval-notes.md
 docs/learning-notes.md    vendor API comparison with doc links
 docs/retrieval-notes.md   chunking, embeddings, xAI embeddings check, bench numbers
+postman/                  Collection v2.1 + local environment for the API
 ```
 
 ## Roadmap (20 weekdays, 19 Nov – 16 Dec 2026)
