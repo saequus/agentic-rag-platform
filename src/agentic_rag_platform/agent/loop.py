@@ -5,10 +5,25 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from pydantic import ValidationError
+from opentelemetry.trace import SpanKind
+from pydantic import BaseModel, ValidationError
 
 from agentic_rag_platform.providers.base import LLMProvider, ProviderResponse
 from agentic_rag_platform.schemas import Answer, ExecutedToolCall, Message
+from agentic_rag_platform.telemetry.tracing import (
+    AGENT_NAME,
+    AGENT_NAME_ATTR,
+    OP_NAME,
+    OUTPUT_TYPE,
+    PROVIDER_NAME,
+    REQUEST_MODEL,
+    REQUEST_TEMPERATURE,
+    RESPONSE_FINISH,
+    USAGE_INPUT,
+    USAGE_OUTPUT,
+    maybe_set,
+    start_span,
+)
 from agentic_rag_platform.tools.registry import ToolSpec, default_tools, execute_tool
 
 DEFAULT_SYSTEM_PROMPT = """You are a careful assistant for finance-related questions.
@@ -57,8 +72,41 @@ async def run_agent(
     ]
     executed: list[ExecutedToolCall] = []
 
+    with start_span(
+        f"invoke_agent {AGENT_NAME}",
+        attributes={
+            OP_NAME: "invoke_agent",
+            AGENT_NAME_ATTR: AGENT_NAME,
+            REQUEST_TEMPERATURE: temperature,
+            PROVIDER_NAME: provider.name,
+            REQUEST_MODEL: provider.model,
+        },
+    ) as agent_span:
+        result = await _run_tool_loop(
+            provider,
+            messages=messages,
+            catalog=catalog,
+            executed=executed,
+            max_iterations=max_iterations,
+            temperature=temperature,
+        )
+        agent_span.set_attribute("gen_ai.tool.call.count", len(result.tool_calls))
+        return result
+
+
+async def _run_tool_loop(
+    provider: LLMProvider,
+    *,
+    messages: list[Message],
+    catalog: list[ToolSpec],
+    executed: list[ExecutedToolCall],
+    max_iterations: int,
+    temperature: float,
+) -> AgentResult:
     for _ in range(max_iterations):
-        response = await provider.complete(messages, tools=catalog, temperature=temperature)
+        response = await _traced_complete(
+            provider, messages, tools=catalog, temperature=temperature
+        )
         if not response.tool_calls:
             parsed = _coerce_answer(response)
             if parsed is not None:
@@ -75,7 +123,7 @@ async def run_agent(
             )
         )
         for call in response.tool_calls:
-            result = await execute_tool(call.name, call.arguments, catalog)
+            result = await execute_tool(call.name, call.arguments, catalog, tool_call_id=call.id)
             executed.append(
                 ExecutedToolCall(
                     id=call.id,
@@ -104,7 +152,8 @@ async def run_agent(
             )
         )
 
-    final = await provider.complete(
+    final = await _traced_complete(
+        provider,
         messages,
         tools=None,
         response_schema=Answer,
@@ -118,6 +167,38 @@ async def run_agent(
             confidence=0.2,
         )
     return AgentResult(answer=answer, tool_calls=executed, messages=messages)
+
+
+async def _traced_complete(
+    provider: LLMProvider,
+    messages: list[Message],
+    *,
+    tools: list[ToolSpec] | None = None,
+    response_schema: type[BaseModel] | None = None,
+    temperature: float | None = None,
+) -> ProviderResponse:
+    model = provider.model
+    attrs = {
+        OP_NAME: "chat",
+        PROVIDER_NAME: provider.name,
+        REQUEST_MODEL: model,
+        REQUEST_TEMPERATURE: temperature,
+        AGENT_NAME_ATTR: AGENT_NAME,
+    }
+    if response_schema is not None:
+        attrs[OUTPUT_TYPE] = "json"
+    with start_span(f"chat {model}", kind=SpanKind.CLIENT, attributes=attrs) as span:
+        response = await provider.complete(
+            messages,
+            tools=tools,
+            response_schema=response_schema,
+            temperature=temperature,
+        )
+        if response.tool_calls:
+            span.set_attribute(RESPONSE_FINISH, ("tool_calls",))
+        maybe_set(span, USAGE_INPUT, response.input_tokens)
+        maybe_set(span, USAGE_OUTPUT, response.output_tokens)
+        return response
 
 
 def _coerce_answer(response: ProviderResponse) -> Answer | None:

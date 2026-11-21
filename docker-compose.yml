@@ -11,6 +11,10 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-xai}
       XAI_API_KEY: ${XAI_API_KEY:-}
       XAI_MODEL: ${XAI_MODEL:-grok-4.7}
+      OTEL_SERVICE_NAME: agentic-rag-platform
+      OTEL_ENVIRONMENT: local
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,7 +37,36 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Day 6: LLM observability. Uncomment when the tracing work lands.
+  # Weekend OpenTelemetry lab: Collector + Jaeger.
+  #   docker compose --profile otel up -d otel-collector jaeger
+  #   # if the API also runs in compose, point it at the collector:
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose --profile otel up --build
+  #   # if the API runs on the host (uv run fastapi dev):
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+  # Jaeger UI: http://127.0.0.1:16686
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.138.0
+    profiles: ["otel"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/otel/collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - jaeger
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.70.0
+    profiles: ["otel"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+    restart: unless-stopped
+
+  # Day 6: LLM observability (Langfuse as an OTLP *backend* on top of these traces).
   # langfuse:
   #   image: langfuse/langfuse:3
   #   ports:

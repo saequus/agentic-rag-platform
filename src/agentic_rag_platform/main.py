@@ -6,7 +6,9 @@ Day 2: ``POST /ingest`` and ``POST /search``.
 
 from __future__ import annotations
 
-from typing import Annotated
+from collections.abc import AsyncIterator, MutableMapping
+from contextlib import asynccontextmanager
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +25,22 @@ from agentic_rag_platform.schemas import (
     Message,
 )
 from agentic_rag_platform.settings import Settings, get_settings
+from agentic_rag_platform.telemetry import configure_telemetry, instrument_app, shutdown_telemetry
+
+
+def _exclude_otel_path(scope: MutableMapping[str, Any]) -> bool:
+    """Skip FastAPI-native spans for probes and docs."""
+    return scope.get("path") in {"/health", "/docs", "/openapi.json", "/redoc"}
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    if configure_telemetry(settings) is not None:
+        instrument_app(_app)
+    yield
+    shutdown_telemetry()
+
 
 app = FastAPI(
     title="agentic-rag-platform",
@@ -30,8 +48,21 @@ app = FastAPI(
     description=(
         "On-prem-capable agentic RAG platform. Day 1 is the LLM gateway "
         "(tool-calling loop, structured outputs, default xAI Grok). "
-        "Day 2 adds PDF ingestion, embeddings and pgvector search."
+        "Day 2 adds PDF ingestion, embeddings and pgvector search. "
+        "OpenTelemetry traces (GenAI semantic conventions) are emitted when "
+        "an OTLP exporter is configured."
     ),
+    lifespan=lifespan,
+    # FastAPI 0.165+ has native OpenTelemetry. We use it for HTTP server spans
+    # and keep auto-export off so setup.py owns the TracerProvider / exporters.
+    telemetry={
+        "tracing": True,
+        "metrics": False,
+        "logs": False,
+        "operation_spans": False,
+        "auto_configure": False,
+        "exclude": _exclude_otel_path,
+    },
 )
 
 app.add_middleware(

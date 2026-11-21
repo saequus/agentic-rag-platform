@@ -61,6 +61,18 @@ class Settings(BaseSettings):
     default_tenant_id: str = "default"
     hnsw_ef_search: int = Field(default=40, ge=1, le=800)
 
+    # OpenTelemetry. Official OTEL_* env vars are honoured. Tracing stays off
+    # until an exporter is configured (OTLP endpoint and/or console).
+    otel_sdk_disabled: bool = False
+    otel_service_name: str = "agentic-rag-platform"
+    otel_environment: str = "local"
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_exporter_otlp_protocol: str = "http/protobuf"
+    otel_traces_exporter: str = "otlp"
+    otel_traces_sampler: str = "parentbased_traceidratio"
+    otel_traces_sampler_arg: float = Field(default=1.0, ge=0.0, le=1.0)
+    otel_redact_content: bool = True
+
     @property
     def model_name(self) -> str:
         if self.llm_provider == "openai":

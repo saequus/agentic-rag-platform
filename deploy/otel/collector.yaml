@@ -1,0 +1,71 @@
+# Local OpenTelemetry Collector (contrib) for the agentic-rag-platform lab.
+# Receives OTLP, redacts obvious secret keys, batches, and forwards to Jaeger.
+# Official docs: https://opentelemetry.io/docs/collector/configuration/
+#
+# Tail sampling is included but commented: it is stateful and is the right
+# production pattern (keep errors and slow traces, sample the rest). Enable it
+# only after you understand the decision_wait buffer.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Drop credentials and raw GenAI content if a client accidentally sends them.
+  # App-level instrumentation already omits prompts by default; this is defence
+  # in depth at the collector.
+  attributes:
+    actions:
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.x-api-key
+        action: delete
+      - key: gen_ai.input.messages
+        action: delete
+      - key: gen_ai.output.messages
+        action: delete
+      - key: gen_ai.retrieval.query.text
+        action: delete
+
+  batch:
+    timeout: 1s
+    send_batch_size: 256
+
+  # Uncomment and add "tail_sampling" to traces.processors (after attributes,
+  # before batch) to keep every error and 10% of everything else.
+  # tail_sampling:
+  #   decision_wait: 10s
+  #   num_traces: 10000
+  #   policies:
+  #     - name: errors
+  #       type: status_code
+  #       status_code:
+  #         status_codes: [ERROR]
+  #     - name: probabilistic
+  #       type: probabilistic
+  #       probabilistic:
+  #         sampling_percentage: 10
+
+exporters:
+  debug:
+    verbosity: basic
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [debug, otlp/jaeger]
