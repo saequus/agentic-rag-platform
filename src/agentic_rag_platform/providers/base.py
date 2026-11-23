@@ -20,6 +20,8 @@ class ProviderResponse(BaseModel):
     content: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
     parsed: BaseModel | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class LLMProvider(Protocol):

@@ -14,7 +14,7 @@ Default LLM provider is **xAI Grok** via the official [`xai-sdk`](https://pypi.o
 and structured-output APIs can be learned and compared — see
 [docs/learning-notes.md](docs/learning-notes.md).
 
-## What works today (Days 1–2)
+## What works today (Days 1–2 + OpenTelemetry lab)
 
 - FastAPI app with `GET /health`, `POST /chat`, `POST /ingest`, `POST /search`
 - Provider interface (`Protocol`) with **xAI as default**, plus OpenAI and
@@ -30,7 +30,13 @@ and structured-output APIs can be learned and compared — see
   `intfloat/multilingual-e5-base` (e5 `query:` / `passage:` prefixes,
   L2-normalised). `BAAI/bge-m3` is an option; OpenAI
   `text-embedding-3-small` is used only when `OPENAI_API_KEY` is set.
-- `docker-compose` (api + Postgres/pgvector; Langfuse stub commented for Day 6)
+- OpenTelemetry traces for `/chat`, `/ingest` and `/search`: FastAPI, psycopg
+  and httpx auto-instrumentation, plus manual GenAI spans (`invoke_agent`,
+  `chat`, `execute_tool`, `embeddings`, `retrieval`). Off until you set
+  `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_TRACES_EXPORTER=console`. See
+  [docs/otel-notes.md](docs/otel-notes.md).
+- `docker-compose` (api + Postgres/pgvector; `otel` profile for Collector + Jaeger;
+  Langfuse stub commented for Day 6)
 - Multi-stage, non-root `Dockerfile` built with `uv`
 - pre-commit (ruff, mypy), pytest, GitHub Actions CI (no real API calls;
   integration tests that need Postgres are skipped unless `DATABASE_URL` is set)
@@ -63,7 +69,7 @@ flowchart TB
     ING --> PG[("Postgres + pgvector")]
     RET --> QD[("Qdrant sparse/BM25")]
 
-    OBS["Observability<br/>Langfuse traces + prompt versions<br/>Prometheus/Grafana · MLflow"]
+    OBS["Observability<br/>OpenTelemetry → Collector<br/>Jaeger / Langfuse / Grafana"]
     DEP["Deploy<br/>compose on a laptop → Helm on kind/k3s<br/>→ rented GPU node + GPU Operator"]
     GW -.-> OBS
     AG -.-> OBS
@@ -71,7 +77,8 @@ flowchart TB
 ```
 
 Days 1–2 are the **LLM gateway** plus the **ingestion / pgvector** slice.
-Hybrid search, MCP, tracing, evals, local inference and Kubernetes land on
+The weekend OpenTelemetry lab adds vendor-neutral traces. Hybrid search, MCP,
+Langfuse (as an OTLP backend), evals, local inference and Kubernetes land on
 later days.
 
 ## Quickstart
@@ -134,7 +141,21 @@ curl -s http://127.0.0.1:8000/health
 Postgres with pgvector is included for ingestion. After the first
 `docker compose up`, run `DATABASE_URL=postgresql://rag:rag@localhost:5432/rag make db-init`
 against the published port (or rely on a local Postgres.app database — see
-below). A Langfuse service is left commented in `docker-compose.yml`.
+below). A Langfuse service is left commented in `docker-compose.yml` (Day 6).
+OpenTelemetry Collector + Jaeger are available with `--profile otel`
+(see [docs/otel-notes.md](docs/otel-notes.md)).
+
+### OpenTelemetry (optional)
+
+```bash
+make otel-up
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+uv run fastapi dev src/agentic_rag_platform/main.py --port 8000
+# send a /chat or /search request, then open http://127.0.0.1:16686
+```
+
+Without Docker, `OTEL_TRACES_EXPORTER=console` prints spans to stdout.
+Details and the GenAI attribute map: [docs/otel-notes.md](docs/otel-notes.md).
 
 ### Tests and live smoke
 

@@ -1,4 +1,4 @@
-.PHONY: dev lint test smoke compose-up compose-down install hooks db-init download ingest bench
+.PHONY: dev lint test smoke compose-up compose-down install hooks db-init download ingest bench otel-up otel-down
 
 install:
 	uv sync --dev
@@ -38,3 +38,9 @@ ingest: download
 
 bench:
 	uv run python scripts/bench.py
+
+otel-up:
+	docker compose --profile otel up -d otel-collector jaeger
+
+otel-down:
+	docker compose --profile otel stop otel-collector jaeger

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
+
+from opentelemetry.trace import SpanKind
 
 from agentic_rag_platform.ingest.chunker import chunk_document
 from agentic_rag_platform.ingest.embedder import Embedder
@@ -20,6 +23,15 @@ from agentic_rag_platform.ingest.store import (
     search as store_search,
 )
 from agentic_rag_platform.ingest.types import Chunk, SearchHit, needs_embedding
+from agentic_rag_platform.telemetry.tracing import (
+    EMBEDDINGS_DIM,
+    OP_NAME,
+    REQUEST_MODEL,
+    RETRIEVAL_TOP_K,
+    TENANT_ID,
+    document_refs,
+    start_span,
+)
 
 
 @dataclass(frozen=True)
@@ -98,6 +110,35 @@ def ingest_paths(
     if doc_id is not None and len(sources) != 1:
         raise ValueError("doc_id can only be set when ingesting a single file")
 
+    with start_span(
+        "ingest",
+        attributes={
+            OP_NAME: "ingest",
+            TENANT_ID: tenant_id,
+            REQUEST_MODEL: embedder.name,
+        },
+    ) as span:
+        summary = _ingest_paths(
+            sources,
+            tenant_id=tenant_id,
+            database_url=database_url,
+            embedder=embedder,
+            doc_id=doc_id,
+        )
+        span.set_attribute("ingest.document.count", len(summary.documents))
+        span.set_attribute("ingest.chunk.count", summary.chunks)
+        span.set_attribute("ingest.embedded.count", summary.embedded)
+        return summary
+
+
+def _ingest_paths(
+    sources: list[Path],
+    *,
+    tenant_id: str,
+    database_url: str,
+    embedder: Embedder,
+    doc_id: str | None = None,
+) -> IngestSummary:
     results: list[IngestDocumentResult] = []
     with connect(database_url) as conn:
         for source in sources:
@@ -127,7 +168,7 @@ def ingest_paths(
                     embeddings.append(None)
 
             if to_embed:
-                vectors = embedder.embed_passages([chunk.text for chunk in to_embed])
+                vectors = _embed_passages(embedder, [chunk.text for chunk in to_embed])
                 if len(vectors) != len(to_embed):
                     raise RuntimeError("embedder returned the wrong number of vectors")
                 vector_iter = iter(vectors)
@@ -181,19 +222,66 @@ def search_query(
 ) -> list[SearchHit]:
     if not query.strip():
         raise ValueError("query must not be empty")
-    vectors = embedder.embed_queries([query])
-    if not vectors:
-        raise RuntimeError("embedder returned no query vector")
-    with connect(database_url) as conn:
-        return store_search(
-            conn,
-            tenant_id=tenant_id,
-            query=vectors[0],
-            k=k,
-            embedding_model=embedder.name,
-            ef_search=ef_search,
-            backend="hnsw",
-        )
+    with start_span(
+        "retrieval",
+        attributes={
+            OP_NAME: "retrieval",
+            RETRIEVAL_TOP_K: k,
+            TENANT_ID: tenant_id,
+            "gen_ai.data_source.id": "pgvector",
+            REQUEST_MODEL: embedder.name,
+        },
+    ) as span:
+        vectors = _embed_queries(embedder, [query])
+        if not vectors:
+            raise RuntimeError("embedder returned no query vector")
+        with connect(database_url) as conn:
+            hits = store_search(
+                conn,
+                tenant_id=tenant_id,
+                query=vectors[0],
+                k=k,
+                embedding_model=embedder.name,
+                ef_search=ef_search,
+                backend="hnsw",
+            )
+        # id + score only; never attach chunk text (may contain sensitive content).
+        from agentic_rag_platform.settings import get_settings
+
+        if not get_settings().otel_redact_content:
+            span.set_attribute("gen_ai.retrieval.query.text", query)
+
+        span.set_attribute("gen_ai.retrieval.document.count", len(hits))
+        refs = document_refs(hits)
+        if refs:
+            span.set_attribute("gen_ai.retrieval.document.ids", tuple(r["id"] for r in refs))
+            span.set_attribute(
+                "gen_ai.retrieval.document.scores",
+                json.dumps([r["score"] for r in refs]),
+            )
+        return hits
+
+
+def _embed_queries(embedder: Embedder, texts: list[str]) -> list[list[float]]:
+    return _embed(embedder, texts, "query")
+
+
+def _embed_passages(embedder: Embedder, texts: list[str]) -> list[list[float]]:
+    return _embed(embedder, texts, "passage")
+
+
+def _embed(embedder: Embedder, texts: list[str], kind: str) -> list[list[float]]:
+    attrs: dict[str, str | int] = {
+        OP_NAME: "embeddings",
+        REQUEST_MODEL: embedder.name,
+        EMBEDDINGS_DIM: embedder.dimensions,
+        "gen_ai.embeddings.input.count": len(texts),
+        "gen_ai.embeddings.kind": kind,
+    }
+    with start_span(f"embeddings {embedder.name}", kind=SpanKind.CLIENT, attributes=attrs):
+        if kind == "query":
+            return embedder.embed_queries(texts)
+        return embedder.embed_passages(texts)
 
 
 def stored_chunk_count(database_url: str, tenant_id: str) -> int:
