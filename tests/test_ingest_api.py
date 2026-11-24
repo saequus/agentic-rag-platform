@@ -9,6 +9,7 @@ from agentic_rag_platform.ingest.pipeline import IngestDocumentResult, IngestSum
 from agentic_rag_platform.ingest.routes import embedder_dep
 from agentic_rag_platform.ingest.types import SearchHit
 from agentic_rag_platform.main import app
+from agentic_rag_platform.retrieval.service import RetrievalResult, Retriever
 
 
 class _FakeEmbedder:
@@ -72,23 +73,28 @@ def test_ingest_success_is_wired(client: TestClient, monkeypatch: pytest.MonkeyP
 
 def test_search_success_is_wired(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     app.dependency_overrides[embedder_dep] = lambda: _FakeEmbedder()
+    seen: dict[str, object] = {}
 
-    def fake_search(*_args: object, **_kwargs: object) -> list[SearchHit]:
-        return [
-            SearchHit(
-                doc_id="eb202501",
-                chunk_no=0,
-                page=3,
-                section="Summary",
-                text="Inflation is close to the 2% target.",
-                content_hash="abc",
-                score=0.91,
-            )
-        ]
+    def fake_retrieve(self: Retriever, query: str, **kwargs: object) -> RetrievalResult:
+        seen.update(kwargs, query=query)
+        return RetrievalResult(
+            hits=[
+                SearchHit(
+                    doc_id="eb202501",
+                    chunk_no=0,
+                    page=3,
+                    section="Summary",
+                    text="Inflation is close to the 2% target.",
+                    content_hash="abc",
+                    score=0.91,
+                )
+            ],
+            strategy=kwargs.get("strategy") or "hybrid",  # type: ignore[arg-type]
+            backend=kwargs.get("backend") or "pgvector",  # type: ignore[arg-type]
+            timings_ms={"search_ms": 1.0},
+        )
 
-    import agentic_rag_platform.ingest.routes as routes
-
-    monkeypatch.setattr(routes, "search_query", fake_search)
+    monkeypatch.setattr(Retriever, "retrieve", fake_retrieve)
     response = client.post("/search", json={"query": "euro area inflation", "k": 5})
     assert response.status_code == 200
     body = response.json()
@@ -97,6 +103,23 @@ def test_search_success_is_wired(client: TestClient, monkeypatch: pytest.MonkeyP
     assert body["hits"][0]["doc_id"] == "eb202501"
     assert body["hits"][0]["section"] == "Summary"
     assert body["hits"][0]["score"] == 0.91
+    assert body["strategy"] == "hybrid"
+    assert body["backend"] == "pgvector"
+    assert seen["strategy"] is None and seen["k"] == 5
+
+    response = client.post(
+        "/search",
+        json={"query": "EDO1136", "strategy": "hybrid_rerank", "backend": "qdrant"},
+    )
+    assert response.status_code == 200
+    assert response.json()["strategy"] == "hybrid_rerank"
+    assert response.json()["backend"] == "qdrant"
+    assert seen["strategy"] == "hybrid_rerank" and seen["backend"] == "qdrant"
+
+
+def test_search_rejects_unknown_strategy(client: TestClient) -> None:
+    response = client.post("/search", json={"query": "x", "strategy": "magic"})
+    assert response.status_code == 422
 
 
 def test_search_rejects_blank_query(client: TestClient) -> None:

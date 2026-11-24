@@ -28,6 +28,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.59b0",
     "opentelemetry-instrumentation-psycopg>=0.59b0",
     "opentelemetry-instrumentation-httpx>=0.59b0",
+    "qdrant-client>=1.15",
 ]
 
 [build-system]
@@ -89,4 +90,7 @@ markers = [
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
+    # qdrant-client embedded mode: payload indexes / HNSW params are no-ops there.
+    "ignore:Payload indexes have no effect:UserWarning",
+    "ignore:Local mode performs exact:UserWarning",
 ]

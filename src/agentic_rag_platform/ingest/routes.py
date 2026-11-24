@@ -1,4 +1,4 @@
-"""HTTP routes for Day 2: ``POST /ingest`` and ``POST /search``."""
+"""HTTP routes: ``POST /ingest`` (Day 2) and ``POST /search`` (Day 3 strategies)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,19 @@ from typing import Annotated
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from agentic_rag_platform.ingest.embedder import Embedder, get_embedder
 from agentic_rag_platform.ingest.pdf import PdfLoadError
-from agentic_rag_platform.ingest.pipeline import ingest_paths, iter_pdf_paths, search_query
+from agentic_rag_platform.ingest.pipeline import ingest_paths, iter_pdf_paths
 from agentic_rag_platform.ingest.types import SearchHit
-from agentic_rag_platform.settings import Settings, get_settings
+from agentic_rag_platform.retrieval.service import Retriever
+from agentic_rag_platform.settings import (
+    RetrievalBackend,
+    RetrievalStrategy,
+    Settings,
+    get_settings,
+)
 
 router = APIRouter()
 
@@ -52,6 +59,13 @@ class SearchRequest(BaseModel):
     tenant_id: str | None = None
     k: int = Field(default=10, ge=1, le=100)
     ef_search: int | None = Field(default=None, ge=1, le=800)
+    strategy: RetrievalStrategy | None = Field(
+        default=None,
+        description="dense | sparse | hybrid | hybrid_rerank (default: RETRIEVAL_STRATEGY)",
+    )
+    backend: RetrievalBackend | None = Field(
+        default=None, description="pgvector | qdrant (default: RETRIEVAL_BACKEND)"
+    )
 
 
 class SearchHitBody(BaseModel):
@@ -68,6 +82,9 @@ class SearchResponse(BaseModel):
     hits: list[SearchHitBody]
     model: str
     tenant_id: str
+    strategy: RetrievalStrategy
+    backend: RetrievalBackend
+    timings_ms: dict[str, float] = Field(default_factory=dict)
 
 
 def settings_dep() -> Settings:
@@ -79,6 +96,13 @@ def embedder_dep(settings: Annotated[Settings, Depends(settings_dep)]) -> Embedd
         return get_embedder(settings)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def retriever_dep(
+    settings: Annotated[Settings, Depends(settings_dep)],
+    embedder: Annotated[Embedder, Depends(embedder_dep)],
+) -> Retriever:
+    return Retriever(settings=settings, embedder=embedder)
 
 
 @router.post("/ingest", response_model=IngestResponse)
@@ -129,26 +153,35 @@ def ingest(
 def search(
     request: SearchRequest,
     settings: Annotated[Settings, Depends(settings_dep)],
-    embedder: Annotated[Embedder, Depends(embedder_dep)],
+    retriever: Annotated[Retriever, Depends(retriever_dep)],
 ) -> SearchResponse:
     tenant_id = request.tenant_id or settings.default_tenant_id
+    if request.ef_search is not None:
+        retriever.settings = settings.model_copy(update={"hnsw_ef_search": request.ef_search})
     try:
-        hits = search_query(
+        result = retriever.retrieve(
             request.query,
             tenant_id=tenant_id,
-            database_url=settings.database_url,
-            embedder=embedder,
             k=request.k,
-            ef_search=request.ef_search or settings.hnsw_ef_search,
+            strategy=request.strategy,
+            backend=request.backend,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, psycopg.Error) as exc:
         raise HTTPException(status_code=503, detail=f"Database error: {exc}") from exc
+    except (ResponseHandlingException, UnexpectedResponse) as exc:
+        raise HTTPException(status_code=503, detail=f"Qdrant error: {exc}") from exc
+    except RuntimeError as exc:
+        # Qdrant local storage locked by another process, reranker failed to load, ...
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return SearchResponse(
-        hits=[_hit_body(hit) for hit in hits],
-        model=embedder.name,
+        hits=[_hit_body(hit) for hit in result.hits],
+        model=retriever.embedder.name,
         tenant_id=tenant_id,
+        strategy=result.strategy,
+        backend=result.backend,
+        timings_ms=result.timings_ms,
     )
 
 
