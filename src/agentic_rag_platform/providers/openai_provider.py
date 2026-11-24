@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 from pydantic import BaseModel
 
 from agentic_rag_platform.providers.base import ProviderError, ProviderResponse
@@ -76,29 +76,56 @@ class OpenAIProvider:
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [_to_openai_message(m) for m in messages],
-            "temperature": temp,
         }
+        if accepts_custom_temperature(self.model):
+            kwargs["temperature"] = temp
         if tools:
             kwargs["tools"] = [_to_openai_tool(spec) for spec in tools]
 
-        if response_schema is not None:
-            completion = await self._client.chat.completions.parse(
-                response_format=response_schema,
-                **kwargs,
-            )
-            choice = completion.choices[0].message
-            return ProviderResponse(
-                content=choice.content,
-                tool_calls=_from_openai_tool_calls(choice.tool_calls),
-                parsed=choice.parsed,
-            )
+        try:
+            completion = await self._dispatch(kwargs, response_schema)
+        except BadRequestError as exc:
+            if "temperature" not in kwargs or not _temperature_rejected(exc):
+                raise
+            kwargs.pop("temperature")
+            completion = await self._dispatch(kwargs, response_schema)
 
-        completion = await self._client.chat.completions.create(**kwargs)
         choice = completion.choices[0].message
         return ProviderResponse(
             content=choice.content,
             tool_calls=_from_openai_tool_calls(choice.tool_calls),
+            parsed=getattr(choice, "parsed", None),
         )
+
+    async def _dispatch(
+        self,
+        kwargs: dict[str, Any],
+        response_schema: type[BaseModel] | None,
+    ) -> Any:
+        if response_schema is not None:
+            return await self._client.chat.completions.parse(
+                response_format=response_schema,
+                **kwargs,
+            )
+        return await self._client.chat.completions.create(**kwargs)
+
+
+# These families return HTTP 400 unless temperature is omitted or left at 1.
+_FIXED_TEMPERATURE_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def accepts_custom_temperature(model: str) -> bool:
+    """Return whether Chat Completions will accept a non-default temperature."""
+    name = model.rsplit("/", 1)[-1].lower()
+    return not any(
+        name == prefix or name.startswith(f"{prefix}-") or name.startswith(f"{prefix}.")
+        for prefix in _FIXED_TEMPERATURE_PREFIXES
+    )
+
+
+def _temperature_rejected(exc: BadRequestError) -> bool:
+    text = str(exc).lower()
+    return "temperature" in text and "only the default" in text
 
 
 def _to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
