@@ -16,7 +16,7 @@ def test_chat_returns_structured_answer(
     override_provider(
         ScriptedProvider([answer("Warsaw is the capital of Poland.", confidence=0.85)])
     )
-    response = client.post("/chat", json={"message": "What is the capital of Poland?"})
+    response = client.post("/chat/loop", json={"message": "What is the capital of Poland?"})
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == "Warsaw is the capital of Poland."
@@ -44,7 +44,7 @@ def test_chat_executes_fx_tool(
             ]
         )
     )
-    response = client.post("/chat", json={"message": "EUR to PLN?"})
+    response = client.post("/chat/loop", json={"message": "EUR to PLN?"})
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == "1 EUR is 4.3 PLN."
@@ -56,7 +56,7 @@ def test_chat_rejects_empty_message(
     client: TestClient, override_provider: Callable[[object], None]
 ) -> None:
     override_provider(ScriptedProvider([answer("should not be called")]))
-    response = client.post("/chat", json={"message": ""})
+    response = client.post("/chat/loop", json={"message": ""})
     assert response.status_code == 422
 
 
@@ -73,6 +73,6 @@ def test_chat_without_provider_key_is_503(monkeypatch: pytest.MonkeyPatch) -> No
     # Drop any leftover override from previous tests.
     app.dependency_overrides.pop(provider_dep, None)
     local = TestClient(app)
-    response = local.post("/chat", json={"message": "hello"})
+    response = local.post("/chat/loop", json={"message": "hello"})
     assert response.status_code == 503
     assert "XAI_API_KEY" in response.json()["detail"]

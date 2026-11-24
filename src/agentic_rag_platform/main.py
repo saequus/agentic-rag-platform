@@ -1,7 +1,9 @@
 """FastAPI gateway.
 
-Day 1: ``GET /health`` and ``POST /chat``.
-Day 2: ``POST /ingest`` and ``POST /search``.
+Day 1: ``GET /health`` and the tool-calling loop (now ``POST /chat/loop``).
+Day 2: ``POST /ingest`` and ``POST /search`` (Day 3 strategies).
+Day 4: LangGraph agent: ``POST /chat``, ``POST /chat/stream`` (SSE),
+``POST /chat/resume`` (human approval) and ``GET /chat/{thread_id}``.
 """
 
 from __future__ import annotations
@@ -15,9 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agentic_rag_platform import __version__
 from agentic_rag_platform.agent.loop import run_agent
+from agentic_rag_platform.deps import provider_dep, settings_dep
+from agentic_rag_platform.graph.checkpoint import close_agent_runtime, get_agent_runtime
+from agentic_rag_platform.graph.routes import router as agent_router
 from agentic_rag_platform.ingest.routes import router as ingest_router
 from agentic_rag_platform.providers.base import LLMProvider, ProviderError
-from agentic_rag_platform.providers.factory import get_provider
 from agentic_rag_platform.schemas import (
     ChatRequest,
     ChatResponse,
@@ -25,6 +29,8 @@ from agentic_rag_platform.schemas import (
     Message,
 )
 from agentic_rag_platform.settings import Settings, get_settings
+
+__all__ = ["app", "provider_dep", "settings_dep"]
 from agentic_rag_platform.telemetry import configure_telemetry, instrument_app, shutdown_telemetry
 
 
@@ -38,7 +44,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     if configure_telemetry(settings) is not None:
         instrument_app(_app)
+    # Open the checkpointer now (runs AsyncPostgresSaver.setup()), so a bad
+    # DATABASE_URL shows up in the startup log rather than on the first /chat.
+    await get_agent_runtime(settings)
     yield
+    await close_agent_runtime()
     shutdown_telemetry()
 
 
@@ -49,6 +59,8 @@ app = FastAPI(
         "On-prem-capable agentic RAG platform. Day 1 is the LLM gateway "
         "(tool-calling loop, structured outputs, default xAI Grok). "
         "Day 2 adds PDF ingestion, embeddings and pgvector search. "
+        "Day 3 adds hybrid search (Qdrant, BM25, reranking). "
+        "Day 4 adds the LangGraph agent with checkpoints, SSE and human approval. "
         "OpenTelemetry traces (GenAI semantic conventions) are emitted when "
         "an OTLP exporter is configured."
     ),
@@ -73,17 +85,7 @@ app.add_middleware(
 )
 
 app.include_router(ingest_router)
-
-
-def settings_dep() -> Settings:
-    return get_settings()
-
-
-def provider_dep(settings: Annotated[Settings, Depends(settings_dep)]) -> LLMProvider:
-    try:
-        return get_provider(settings)
-    except ProviderError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+app.include_router(agent_router)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -91,8 +93,8 @@ def health(settings: Annotated[Settings, Depends(settings_dep)]) -> HealthRespon
     return HealthResponse(status="ok", provider=settings.llm_provider, model=settings.model_name)
 
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(
+@app.post("/chat/loop", response_model=ChatResponse)
+async def chat_loop(
     request: ChatRequest,
     settings: Annotated[Settings, Depends(settings_dep)],
     provider: Annotated[LLMProvider, Depends(provider_dep)],

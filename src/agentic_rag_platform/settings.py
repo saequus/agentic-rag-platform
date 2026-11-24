@@ -15,6 +15,7 @@ RetrievalStrategy = Literal["dense", "sparse", "hybrid", "hybrid_rerank"]
 RetrievalBackend = Literal["pgvector", "qdrant"]
 FusionMethod = Literal["rrf", "dbsf"]
 LexicalScoring = Literal["idf", "ts_rank_cd"]
+CheckpointerKind = Literal["postgres", "memory"]
 
 DEFAULT_XAI_REST_BASE = "https://api.x.ai/v1"
 DEFAULT_XAI_GRPC_HOST = "api.x.ai"
@@ -88,6 +89,24 @@ class Settings(BaseSettings):
     # BAAI/bge-reranker-v2-m3 is multilingual (Polish) but ~5x larger.
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_batch_size: int = Field(default=16, ge=1, le=256)
+
+    # Day 4 LangGraph agent (POST /chat, /chat/stream, /chat/resume).
+    # "postgres" persists thread state in DATABASE_URL (tables are created by
+    # AsyncPostgresSaver.setup()); "memory" is per-process (tests, quick demos).
+    agent_checkpointer: CheckpointerKind = "postgres"
+    # Loop / cost guards. recursion_limit caps graph super-steps; max_rewrites
+    # caps the retrieve -> grade -> rewrite loop; max_llm_calls is the per-turn
+    # budget kept in graph state; node timeout bounds every LLM call.
+    agent_recursion_limit: int = Field(default=25, ge=5, le=200)
+    agent_max_rewrites: int = Field(default=2, ge=0, le=5)
+    agent_max_llm_calls: int = Field(default=10, ge=2, le=50)
+    agent_node_timeout_seconds: float = Field(default=45.0, gt=0)
+    agent_top_k: int = Field(default=5, ge=1, le=20)
+    # Thread memory: how many previous turns (user + assistant pairs) go into prompts.
+    agent_history_turns: int = Field(default=4, ge=0, le=20)
+    # Retrieval defaults for the agent (fall back to RETRIEVAL_STRATEGY / RETRIEVAL_BACKEND).
+    agent_retrieval_strategy: RetrievalStrategy | None = None
+    agent_retrieval_backend: RetrievalBackend | None = None
 
     # OpenTelemetry. Official OTEL_* env vars are honoured. Tracing stays off
     # until an exporter is configured (OTLP endpoint and/or console).

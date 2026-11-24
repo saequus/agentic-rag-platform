@@ -220,3 +220,7 @@ def _coerce_answer(response: ProviderResponse) -> Answer | None:
         return Answer.model_validate(json.loads(text))
     except (ValidationError, json.JSONDecodeError, TypeError):
         return None
+
+
+# Public alias: the Day 4 LangGraph nodes reuse the same traced ``chat {model}`` span.
+traced_complete = _traced_complete

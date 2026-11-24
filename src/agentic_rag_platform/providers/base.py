@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import AsyncIterator
+from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -46,3 +47,19 @@ class LLMProvider(Protocol):
         response_schema: type[BaseModel] | None = None,
         temperature: float | None = None,
     ) -> ProviderResponse: ...
+
+
+@runtime_checkable
+class StreamingLLMProvider(LLMProvider, Protocol):
+    """Optional capability: stream plain-text tokens (Day 4 SSE).
+
+    Providers that do not implement it still work with ``/chat/stream``: the
+    agent falls back to one ``complete`` call and emits the text as one chunk.
+    """
+
+    def stream_text(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]: ...
