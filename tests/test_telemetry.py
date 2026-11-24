@@ -140,3 +140,72 @@ def test_health_is_excluded_from_http_spans(spans: InMemorySpanExporter) -> None
         if "health" in span.name.lower() or (span.attributes or {}).get("http.route") == "/health"
     ]
     assert http_spans == []
+
+
+@pytest.mark.asyncio
+async def test_graph_nodes_nest_under_invoke_agent_without_content(
+    spans: InMemorySpanExporter,
+) -> None:
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from agentic_rag_platform.graph.builder import build_graph
+    from agentic_rag_platform.graph.nodes import AgentContext
+    from agentic_rag_platform.graph.runner import run_turn
+    from tests.fakes import FakeAgentLLM, FakeRetrieve, hit
+
+    secret_question = "Jakie jest oprocentowanie EDO1136 dla PESEL 00000000000?"
+    llm = FakeAgentLLM()
+    retrieve = FakeRetrieve([hit("pl-bond-edo-108-2026", "EDO1136 5,35%", page=2)])
+    ctx = AgentContext(provider=llm, retrieve=retrieve, settings=Settings())
+    graph = build_graph(InMemorySaver())
+    await run_turn(
+        graph,
+        ctx,
+        thread_id="otel-1",
+        payload={"question": secret_question, "tenant_id": "default", "k": 5},
+        tenant_id="default",
+    )
+
+    root = _by_name(spans, f"invoke_agent {AGENT_NAME}")
+    assert len(root) == 1
+    root_attrs = _attrs(root[0])
+    assert root_attrs["gen_ai.conversation.id"] == "otel-1"
+    assert root_attrs["agent.llm_calls"] == 4
+
+    node_spans = [s for s in spans.get_finished_spans() if s.name.startswith("node ")]
+    assert {s.name for s in node_spans} >= {"node route", "node retrieve", "node generate"}
+    root_id = root[0].context.span_id
+    assert all(s.parent is not None and s.parent.span_id == root_id for s in node_spans)
+    chat_spans = [s for s in spans.get_finished_spans() if s.name == "chat fake-model"]
+    assert len(chat_spans) == 4
+    assert all(s.parent is not None and s.parent.span_id != root_id for s in chat_spans)
+
+    for span in spans.get_finished_spans():
+        for value in (span.attributes or {}).values():
+            assert "PESEL" not in str(value)
+            assert "5,35%" not in str(value)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_is_not_an_error_span(spans: InMemorySpanExporter) -> None:
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from agentic_rag_platform.graph.builder import build_graph
+    from agentic_rag_platform.graph.nodes import AgentContext
+    from agentic_rag_platform.graph.runner import run_turn
+    from tests.fakes import FakeAgentLLM, FakeRetrieve
+
+    llm = FakeAgentLLM(route="tool", tool_name="save_note")
+    ctx = AgentContext(provider=llm, retrieve=FakeRetrieve(), settings=Settings())
+    outcome = await run_turn(
+        build_graph(InMemorySaver()),
+        ctx,
+        thread_id="otel-2",
+        payload={"question": "save a note", "tenant_id": "default", "k": 5},
+        tenant_id="default",
+    )
+    assert outcome.status == "interrupted"
+    approval = _by_name(spans, "node approval")
+    assert len(approval) == 1
+    assert approval[0].status.status_code != StatusCode.ERROR
+    assert _attrs(approval[0])["langgraph.interrupted"] is True

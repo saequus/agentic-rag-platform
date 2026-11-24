@@ -11,6 +11,8 @@ services:
     # Docker Desktop on macOS does not deliver inotify events for host edits.
     volumes:
       - ./src:/app/src:ro
+      # So `make db-init-docker` applies the migrations from this checkout.
+      - ./migrations:/app/migrations:ro
     environment:
       DATABASE_URL: postgresql://rag:rag@postgres:5432/rag
       QDRANT_URL: http://qdrant:6333
@@ -22,7 +24,14 @@ services:
       XAI_MODEL: ${XAI_MODEL:-grok-4.7}
       OTEL_SERVICE_NAME: agentic-rag-platform
       OTEL_ENVIRONMENT: local
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      # Inside the container 127.0.0.1 is the container itself, so the host value
+      # from .env (OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318) must not leak
+      # in here. Compose reads .env for ${...} too, hence a separate variable.
+      # Start the collector with: docker compose --profile otel up -d
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${DOCKER_OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      # Day 4: LangGraph thread state in the same Postgres (tables created by
+      # AsyncPostgresSaver.setup() on API start).
+      AGENT_CHECKPOINTER: ${AGENT_CHECKPOINTER:-postgres}
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
     command:
       - uvicorn

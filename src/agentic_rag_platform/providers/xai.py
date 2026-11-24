@@ -40,6 +40,7 @@ Override with ``XAI_MODEL``.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 from pydantic import BaseModel
@@ -121,6 +122,21 @@ class XAIProvider:
             content=response.content or None,
             tool_calls=_from_xai_tool_calls(response.tool_calls),
         )
+
+    async def stream_text(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]:
+        """Stream text deltas with ``chat.stream()`` (yields ``(response, chunk)``)."""
+        temp = self.temperature if temperature is None else temperature
+        chat = self._client_on_running_loop().chat.create(model=self.model, temperature=temp)
+        for message in messages:
+            chat.append(_to_xai_message(message))
+        async for _response, chunk in chat.stream():
+            if chunk.content:
+                yield chunk.content
 
 
 def _to_xai_tool(spec: ToolSpec) -> chat_pb2.Tool:

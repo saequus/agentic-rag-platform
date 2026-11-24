@@ -29,6 +29,10 @@ dependencies = [
     "opentelemetry-instrumentation-psycopg>=0.59b0",
     "opentelemetry-instrumentation-httpx>=0.59b0",
     "qdrant-client>=1.15",
+    "langgraph>=1.2",
+    "langgraph-checkpoint-postgres>=3.2",
+    "pydantic-ai-slim>=2.70",
+    "psycopg-pool>=3.3",
 ]
 
 [build-system]

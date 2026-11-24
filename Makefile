@@ -1,4 +1,4 @@
-.PHONY: dev lint test smoke compose-up compose-down install hooks db-init download ingest bench otel-up otel-down qdrant-up qdrant-down qdrant-sync eval-labels eval
+.PHONY: dev lint test smoke compose-up compose-down install hooks db-init db-init-docker db-check-docker download ingest bench otel-up otel-down qdrant-up qdrant-down qdrant-sync eval-labels eval agent-graph
 
 install:
 	uv sync --dev
@@ -29,6 +29,15 @@ compose-down:
 
 db-init:
 	uv run python -m agentic_rag_platform.ingest.migrate
+
+# Apply every migrations/NNN_*.sql to the *compose* Postgres (postgres:5432 inside
+# the network), not the DATABASE_URL in your .env. Needs `docker compose up -d api`.
+db-init-docker:
+	docker compose exec api python -m agentic_rag_platform.ingest.migrate
+
+# Show what the compose database actually has (content_tsv + LangGraph tables).
+db-check-docker:
+	docker compose exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "\d chunks" -c "\dt"'
 
 download:
 	uv run python scripts/download_corpus.py
@@ -66,3 +75,7 @@ eval-labels:
 EVAL_BACKENDS ?= pgvector,qdrant
 eval:
 	uv run python scripts/eval_retrieval.py --backends $(EVAL_BACKENDS)
+
+# Day 4: print the LangGraph agent as Mermaid.
+agent-graph:
+	uv run python -c "from agentic_rag_platform.graph.builder import build_graph, mermaid; print(mermaid(build_graph(None)))"
