@@ -816,6 +816,168 @@
               "body": "{\n  \"hits\": [\n    {\n      \"doc_id\": \"eb202501\",\n      \"chunk_no\": 0,\n      \"page\": 3,\n      \"section\": \"Summary\",\n      \"text\": \"Inflation is close to the 2% target.\",\n      \"content_hash\": \"abc\",\n      \"score\": 0.91\n    }\n  ],\n  \"model\": \"intfloat/multilingual-e5-base\",\n  \"tenant_id\": \"default\"\n}"
             }
           ]
+        },
+        {
+          "name": "Hybrid + rerank on Qdrant (EDO1136)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Strategy and backend echoed', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.strategy).to.eql('hybrid_rerank');",
+                  "  pm.expect(body.backend).to.eql('qdrant');",
+                  "  pm.expect(body).to.have.property('timings_ms');",
+                  "  pm.expect(body.hits).to.be.an('array');",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Jakie jest oprocentowanie obligacji EDO1136 w pierwszym okresie odsetkowym?\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"k\": 5,\n  \"strategy\": \"hybrid_rerank\",\n  \"backend\": \"qdrant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ]
+            },
+            "description": "Day 3. Dense + BM25 sparse prefetch fused with RRF in Qdrant, then a cross-encoder rescoring the top 50. Needs Qdrant (`make qdrant-up && make qdrant-sync`, or embedded mode). `timings_ms` shows embed / search / rerank time."
+          },
+          "response": []
+        },
+        {
+          "name": "Hybrid on pgvector (SQL RRF)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Strategy and backend echoed', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.strategy).to.eql('hybrid');",
+                  "  pm.expect(body.backend).to.eql('pgvector');",
+                  "  pm.expect(body).to.have.property('timings_ms');",
+                  "  pm.expect(body.hits).to.be.an('array');",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What did the Governing Council decide at its meeting on 10 September 2026?\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"k\": 5,\n  \"strategy\": \"hybrid\",\n  \"backend\": \"pgvector\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ]
+            },
+            "description": "Day 3. pgvector HNSW top 50 + Postgres full-text (tsvector, 'simple' config) top 50, fused with Reciprocal Rank Fusion in one SQL query. Needs `make db-init` (migration 002)."
+          },
+          "response": []
+        },
+        {
+          "name": "Sparse only (exact identifier)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Strategy and backend echoed', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.strategy).to.eql('sparse');",
+                  "  pm.expect(body.backend).to.eql('pgvector');",
+                  "  pm.expect(body).to.have.property('timings_ms');",
+                  "  pm.expect(body.hits).to.be.an('array');",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"COI1130\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"k\": 5,\n  \"strategy\": \"sparse\",\n  \"backend\": \"pgvector\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ]
+            },
+            "description": "Day 3. Lexical search only: shows why exact identifiers (bond series, ISINs, dates) need the sparse leg."
+          },
+          "response": []
         }
       ]
     }

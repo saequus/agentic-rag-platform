@@ -1,4 +1,4 @@
-"""Apply the Day 2 SQL migration (idempotent).
+"""Apply the SQL migrations in ``migrations/`` in order (all idempotent).
 
 Usage:
     uv run python -m agentic_rag_platform.ingest.migrate
@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from pathlib import Path
 
 import psycopg
 
@@ -25,10 +26,12 @@ def init_schema(database_url: str, dimensions: int) -> None:
     if dimensions < 1:
         raise ValueError("dimensions must be a positive integer")
 
-    sql_path = migrations_dir() / "001_init.sql"
-    if not sql_path.is_file():
-        raise FileNotFoundError(f"Migration file not found: {sql_path}")
-    sql = sql_path.read_text(encoding="utf-8").replace(PLACEHOLDER, str(dimensions))
+    sql_paths = migration_files()
+    if not sql_paths or sql_paths[0].name != "001_init.sql":
+        raise FileNotFoundError(f"Migration file not found: {migrations_dir() / '001_init.sql'}")
+    scripts = [
+        path.read_text(encoding="utf-8").replace(PLACEHOLDER, str(dimensions)) for path in sql_paths
+    ]
 
     with psycopg.connect(database_url, autocommit=True) as conn:
         existing = _existing_dimension(conn)
@@ -42,7 +45,13 @@ def init_schema(database_url: str, dimensions: int) -> None:
             # Tables already match; still apply the script so new indexes are
             # created (CREATE IF NOT EXISTS is safe).
             pass
-        _run_sql(conn, sql)
+        for sql in scripts:
+            _run_sql(conn, sql)
+
+
+def migration_files() -> list[Path]:
+    """All ``NNN_*.sql`` files in order (every script must be idempotent)."""
+    return sorted(migrations_dir().glob("[0-9][0-9][0-9]_*.sql"))
 
 
 def _existing_dimension(conn: psycopg.Connection) -> int | None:
@@ -115,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, psycopg.Error, RuntimeError, ValueError) as exc:
         print(f"db-init failed: {exc}", file=sys.stderr)
         return 1
-    print("Schema is ready (documents, chunks, HNSW index).")
+    print("Schema is ready (documents, chunks, HNSW index, full-text GIN index).")
     return 0
 
 

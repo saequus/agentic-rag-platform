@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "questions": 50,
+    "relevant_chunks": 72,
+    "groups": {
+      "exact/ecb": 18,
+      "exact/pl-bonds": 11,
+      "paraphrase/ecb": 14,
+      "paraphrase/pl-bonds": 7
+    },
+    "embedder": "intfloat/multilingual-e5-base",
+    "reranker": "BAAI/bge-reranker-v2-m3",
+    "candidates": 50,
+    "rrf_k": 60,
+    "qdrant_fusion": "rrf",
+    "qdrant": "http://localhost:6333",
+    "hnsw_ef_search": 40,
+    "embed_ms_p50": 15.7,
+    "embed_ms_p95": 25.5,
+    "machine": "Linux x86_64, CPU only",
+    "date": "2026-11-24"
+  },
+  "rows": [
+    {
+      "backend": "qdrant",
+      "strategy": "hybrid_rerank",
+      "hit@5": 0.72,
+      "recall@5": 0.67,
+      "mrr@10": 0.651,
+      "doc_hit@5": 0.88,
+      "search_ms_p50": 19.6,
+      "search_ms_p95": 26.8,
+      "rerank_ms_p50": 10332.9,
+      "rerank_ms_p95": 14031.7,
+      "hit@5_by_group": {
+        "exact/ecb": 0.833,
+        "exact/pl-bonds": 0.636,
+        "paraphrase/ecb": 1.0,
+        "paraphrase/pl-bonds": 0.0
+      }
+    }
+  ]
+}

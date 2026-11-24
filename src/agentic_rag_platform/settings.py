@@ -11,6 +11,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProviderName = Literal["xai", "openai", "anthropic"]
 EmbeddingProvider = Literal["local", "openai", "hash"]
+RetrievalStrategy = Literal["dense", "sparse", "hybrid", "hybrid_rerank"]
+RetrievalBackend = Literal["pgvector", "qdrant"]
+FusionMethod = Literal["rrf", "dbsf"]
+LexicalScoring = Literal["idf", "ts_rank_cd"]
 
 DEFAULT_XAI_REST_BASE = "https://api.x.ai/v1"
 DEFAULT_XAI_GRPC_HOST = "api.x.ai"
@@ -60,6 +64,30 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=16, ge=1, le=256)
     default_tenant_id: str = "default"
     hnsw_ef_search: int = Field(default=40, ge=1, le=800)
+
+    # Day 3 retrieval. Strategy and backend are defaults; /search can override
+    # both per request. "sparse" is BM25-style lexical search (Postgres
+    # full-text on pgvector, a BM25 sparse vector on Qdrant).
+    retrieval_strategy: RetrievalStrategy = "hybrid"
+    retrieval_backend: RetrievalBackend = "pgvector"
+    # How many candidates each leg (dense, sparse) contributes before fusion,
+    # and how many fused candidates the cross-encoder rescores.
+    retrieval_candidates: int = Field(default=50, ge=1, le=500)
+    rrf_k: int = Field(default=60, ge=1, le=1000)
+    qdrant_fusion: FusionMethod = "rrf"
+    # Postgres lexical scorer: "idf" (BM25-flavoured, default) or the naive
+    # "ts_rank_cd" baseline (no IDF). See retrieval/pg.py.
+    pg_lexical_scoring: LexicalScoring = "idf"
+    # Qdrant: QDRANT_URL wins (server, e.g. http://localhost:6333). Otherwise
+    # QDRANT_PATH is used in embedded local mode (":memory:" for tests).
+    qdrant_url: str | None = None
+    qdrant_api_key: SecretStr | None = None
+    qdrant_path: str = "data/qdrant"
+    qdrant_collection: str = "chunks"
+    # Cross-encoder reranker. MiniLM is the CPU-friendly default;
+    # BAAI/bge-reranker-v2-m3 is multilingual (Polish) but ~5x larger.
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_batch_size: int = Field(default=16, ge=1, le=256)
 
     # OpenTelemetry. Official OTEL_* env vars are honoured. Tracing stays off
     # until an exporter is configured (OTLP endpoint and/or console).

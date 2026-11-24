@@ -14,7 +14,7 @@ Default LLM provider is **xAI Grok** via the official [`xai-sdk`](https://pypi.o
 and structured-output APIs can be learned and compared — see
 [docs/learning-notes.md](docs/learning-notes.md).
 
-## What works today (Days 1–2 + OpenTelemetry lab)
+## What works today (Days 1–3 + OpenTelemetry lab)
 
 - FastAPI app with `GET /health`, `POST /chat`, `POST /ingest`, `POST /search`
 - Provider interface (`Protocol`) with **xAI as default**, plus OpenAI and
@@ -35,7 +35,7 @@ and structured-output APIs can be learned and compared — see
   `chat`, `execute_tool`, `embeddings`, `retrieval`). Off until you set
   `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_TRACES_EXPORTER=console`. See
   [docs/otel-notes.md](docs/otel-notes.md).
-- `docker-compose` (api + Postgres/pgvector; `otel` profile for Collector + Jaeger;
+- `docker-compose` (api + Postgres/pgvector + Qdrant; `otel` profile for Collector + Jaeger;
   Langfuse stub commented for Day 6)
 - Multi-stage, non-root `Dockerfile` built with `uv`
 - pre-commit (ruff, mypy), pytest, GitHub Actions CI (no real API calls;
@@ -43,6 +43,13 @@ and structured-output APIs can be learned and compared — see
 - `make smoke` — optional live call to xAI when `XAI_API_KEY` is set
 - `make db-init`, `make ingest`, `make bench` — schema, corpus ingest, HNSW vs
   exact-search numbers in [docs/retrieval-notes.md](docs/retrieval-notes.md)
+- Day 3 retrieval: `dense | sparse | hybrid | hybrid_rerank` on **pgvector**
+  (Postgres full-text + pgvector fused with RRF in one SQL query) or **Qdrant**
+  (dense + BM25 sparse vectors in one collection, Query API prefetch + RRF/DBSF),
+  plus a cross-encoder reranker (top 50 → top k). Chosen by
+  `RETRIEVAL_STRATEGY` / `RETRIEVAL_BACKEND` or per `/search` request.
+- `make eval` — 50 labelled questions, hit@5 / recall@5 / MRR@10 per strategy
+  and backend ([docs/eval-results.md](docs/eval-results.md))
 
 ## Planned architecture
 
@@ -204,6 +211,50 @@ in [docs/retrieval-notes.md](docs/retrieval-notes.md) but are not in
 `data/urls.txt`, because nbp.pl served a bot challenge from the network
 used to verify the URLs.
 
+### Day 3: hybrid search, Qdrant, reranking
+
+```bash
+git pull && uv sync --dev
+make db-init        # adds migration 002: generated tsvector column + GIN index (keeps your data)
+make test
+
+# Qdrant, pick one:
+make qdrant-up && export QDRANT_URL=http://127.0.0.1:6333    # Docker
+# or the native binary (no Docker), macOS arm64:
+#   curl -L https://github.com/qdrant/qdrant/releases/download/v1.20.2/qdrant-aarch64-apple-darwin.tar.gz | tar xz
+#   ./qdrant &          # then: export QDRANT_URL=http://127.0.0.1:6333
+# or leave QDRANT_URL unset: embedded mode in data/qdrant (no server, brute force,
+# one process at a time, so stop the API before running make eval)
+
+make qdrant-sync    # copies chunks + their e5 vectors from Postgres into Qdrant
+make eval           # ~2 min on CPU; writes docs/eval-results.md and data/eval/results.json
+make eval EVAL_BACKENDS=pgvector   # if you skip Qdrant
+```
+
+The first `hybrid_rerank` request downloads `cross-encoder/ms-marco-MiniLM-L-6-v2`
+(~90 MB). `RERANK_MODEL=BAAI/bge-reranker-v2-m3` is multilingual and scored
+better, but takes ~8–10 s per query on CPU.
+
+```bash
+curl -s http://127.0.0.1:8000/search -H 'content-type: application/json' -d '{
+  "query": "Jakie jest oprocentowanie obligacji EDO1136 w pierwszym okresie odsetkowym?",
+  "k": 5, "strategy": "hybrid_rerank", "backend": "qdrant"}' | jq '.timings_ms, .hits[].doc_id'
+```
+
+Results (50 questions, e5-base, CPU; full table and method in
+[docs/retrieval-notes.md](docs/retrieval-notes.md#day-3-hybrid-search-qdrant-reranking)):
+
+| backend | strategy | hit@5 | recall@5 | MRR@10 | search p50 |
+|---|---|---|---|---|---|
+| pgvector | dense | 0.40 | 0.33 | 0.32 | 11.9 ms |
+| pgvector | sparse | 0.58 | 0.51 | 0.46 | 27.5 ms |
+| pgvector | hybrid | 0.64 | 0.58 | 0.50 | 23.0 ms |
+| pgvector | hybrid_rerank | 0.70 | 0.64 | 0.57 | 31.4 ms |
+| qdrant | dense | 0.54 | 0.44 | 0.41 | 8.2 ms |
+| qdrant | sparse | 0.56 | 0.50 | 0.47 | 7.8 ms |
+| qdrant | hybrid | 0.64 | 0.55 | 0.47 | 14.8 ms |
+| qdrant | hybrid_rerank | 0.68 | 0.62 | 0.56 | 16.6 ms |
+
 CI on `main` and on pull requests runs ruff, mypy and pytest only. No secrets
 are required and no provider APIs are contacted.
 
@@ -236,12 +287,17 @@ src/agentic_rag_platform/
   tools/                  get_fx_rate + registry
   agent/loop.py           tool loop + structured final answer
   ingest/                 Day 2: PDF load, chunker, embedders, pgvector store
+  retrieval/              Day 3: BM25 tokenizer, RRF, pgvector/Qdrant search, reranker
 migrations/001_init.sql   documents + chunks + HNSW index
+migrations/002_fulltext.sql  tsvector column + GIN index (lexical leg)
+data/eval/                seeds.jsonl (questions) -> questions.jsonl (labels), results
 data/urls.txt             verified public PDF list (files themselves gitignored)
 tests/                    mocked unit tests + optional pgvector integration tests
 scripts/smoke.py          optional live xAI check
 scripts/download_corpus.py
 scripts/bench.py          HNSW vs exact search → docs/retrieval-notes.md
+scripts/build_eval_set.py relevance labels from seeds (make eval-labels)
+scripts/eval_retrieval.py hit@5 / recall@5 / MRR@10 per strategy (make eval)
 docs/learning-notes.md    vendor API comparison with doc links
 docs/retrieval-notes.md   chunking, embeddings, xAI embeddings check, bench numbers
 postman/                  Collection v2.1 + local environment for the API
@@ -251,7 +307,7 @@ postman/                  Collection v2.1 + local environment for the API
 
 - [x] **Day 1** — LLM gateway, provider interface, tool calling, structured output, CI
 - [x] **Day 2** — Ingestion, chunking, embeddings, pgvector
-- [ ] **Day 3** — Hybrid search, Qdrant, reranking
+- [x] **Day 3** — Hybrid search, Qdrant, reranking
 - [ ] **Day 4** — LangGraph agents (LangChain / LlamaIndex / Pydantic AI trade-offs)
 - [ ] **Day 5** — MCP server and client
 - [ ] **Day 6** — Observability: Langfuse, prompt versioning, OpenTelemetry

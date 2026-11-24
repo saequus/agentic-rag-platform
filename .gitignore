@@ -38,3 +38,6 @@ data/raw/
 # Local model / Hugging Face caches if someone sets them inside the repo
 .cache/
 data/models/
+
+# Embedded Qdrant storage (QDRANT_PATH) — rebuild with `make qdrant-sync`
+data/qdrant/

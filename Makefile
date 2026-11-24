@@ -1,4 +1,4 @@
-.PHONY: dev lint test smoke compose-up compose-down install hooks db-init download ingest bench otel-up otel-down
+.PHONY: dev lint test smoke compose-up compose-down install hooks db-init download ingest bench otel-up otel-down qdrant-up qdrant-down qdrant-sync eval-labels eval
 
 install:
 	uv sync --dev
@@ -44,3 +44,25 @@ otel-up:
 
 otel-down:
 	docker compose --profile otel stop otel-collector jaeger
+
+# Day 3: hybrid search.
+qdrant-up:
+	docker compose up -d qdrant
+
+qdrant-down:
+	docker compose stop qdrant
+
+# Copy chunks + stored embeddings from Postgres into Qdrant (dense + BM25 sparse).
+# Uses QDRANT_URL if set, otherwise embedded mode at QDRANT_PATH (data/qdrant).
+qdrant-sync:
+	uv run python -m agentic_rag_platform.retrieval.qdrant_sync --recreate
+
+# Re-derive relevance labels after re-chunking (data/eval/seeds.jsonl -> questions.jsonl).
+eval-labels:
+	uv run python scripts/build_eval_set.py
+
+# recall@5 / MRR@10 for dense, sparse, hybrid, hybrid_rerank on pgvector and Qdrant.
+# Skip Qdrant with: make eval EVAL_BACKENDS=pgvector
+EVAL_BACKENDS ?= pgvector,qdrant
+eval:
+	uv run python scripts/eval_retrieval.py --backends $(EVAL_BACKENDS)
