@@ -22,7 +22,7 @@ services:
       XAI_MODEL: ${XAI_MODEL:-grok-4.7}
       OTEL_SERVICE_NAME: agentic-rag-platform
       OTEL_ENVIRONMENT: local
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
     command:
       - uvicorn
