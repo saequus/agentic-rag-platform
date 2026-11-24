@@ -63,7 +63,9 @@ def test_chat_rejects_empty_message(
 def test_chat_without_provider_key_is_503(monkeypatch: pytest.MonkeyPatch) -> None:
     # No override: factory tries to build the real xAI client and must fail
     # closed when the key is missing, without making a network call.
-    # An empty env var wins over `.env`, so a local key cannot leak into this test.
+    # An empty env var wins over `.env`, so a local key or LLM_PROVIDER cannot
+    # leak into this test.
+    monkeypatch.setenv("LLM_PROVIDER", "xai")
     monkeypatch.setenv("XAI_API_KEY", "")
     from agentic_rag_platform.settings import get_settings
 

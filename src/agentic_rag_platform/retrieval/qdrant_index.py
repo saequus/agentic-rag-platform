@@ -16,6 +16,7 @@ auth context in production), never from free-form user filters.
 
 from __future__ import annotations
 
+import atexit
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -59,11 +60,32 @@ def _cached_client(url: str | None, api_key: str | None, path: str) -> QdrantCli
     return QdrantClient(path=path)
 
 
+_exit_hooks: set[int] = set()
+
+
 def shared_client(settings: Settings) -> QdrantClient:
     """Process-wide client. Embedded (path) mode holds a file lock, so only one
-    client per path may exist; server mode reuses the HTTP connection pool."""
+    client per path may exist; server mode reuses the HTTP connection pool.
+
+    Closed on interpreter shutdown. The client's ``__del__`` imports
+    ``portalocker`` while unlocking the local store, and that import fails once
+    Python has started tearing modules down.
+    """
     key = settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None
-    return _cached_client(settings.qdrant_url, key, settings.qdrant_path)
+    client = _cached_client(settings.qdrant_url, key, settings.qdrant_path)
+    if id(client) not in _exit_hooks:
+        _exit_hooks.add(id(client))
+        atexit.register(client.close)
+    return client
+
+
+def _hnsw_params(client: QdrantClient, ef: int) -> models.SearchParams | None:
+    """HNSW params apply on a Qdrant server. Local mode is exact search and warns
+    if they are set. IDF params are separate: local mode does honour those."""
+    inner = getattr(client, "_client", None)
+    if type(inner).__name__ in {"QdrantLocal", "AsyncQdrantLocal"}:
+        return None
+    return models.SearchParams(hnsw_ef=ef)
 
 
 def point_id(tenant_id: str, doc_id: str, chunk_no: int) -> str:
@@ -177,8 +199,8 @@ def search(
 ) -> list[SearchHit]:
     flt = tenant_filter(tenant_id, embedding_model)
     # HNSW returns at most ef results; keep ef >= the number of results asked for.
-    dense_params = models.SearchParams(hnsw_ef=max(hnsw_ef or 64, k))
-    prefetch_params = models.SearchParams(hnsw_ef=max(hnsw_ef or 64, candidates))
+    dense_params = _hnsw_params(client, max(hnsw_ef or 64, k))
+    prefetch_params = _hnsw_params(client, max(hnsw_ef or 64, candidates))
     # IDF statistics are shard-wide by default, i.e. blended across tenants:
     # a term's rarity would leak other tenants' corpus and skew ranking.
     # Scope the statistics corpus to this tenant with the "idf" search param.
