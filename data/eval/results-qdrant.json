@@ -1,0 +1,97 @@
+{
+  "meta": {
+    "questions": 50,
+    "relevant_chunks": 72,
+    "groups": {
+      "exact/ecb": 18,
+      "exact/pl-bonds": 11,
+      "paraphrase/ecb": 14,
+      "paraphrase/pl-bonds": 7
+    },
+    "embedder": "intfloat/multilingual-e5-base",
+    "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "candidates": 50,
+    "rrf_k": 60,
+    "qdrant_fusion": "rrf",
+    "qdrant": "http://127.0.0.1:6333",
+    "hnsw_ef_search": 40,
+    "embed_ms_p50": 5.7,
+    "embed_ms_p95": 6.6,
+    "machine": "Darwin arm64, CPU only",
+    "date": "2026-11-24"
+  },
+  "rows": [
+    {
+      "backend": "qdrant",
+      "strategy": "dense",
+      "hit@5": 0.54,
+      "recall@5": 0.437,
+      "mrr@10": 0.413,
+      "doc_hit@5": 0.88,
+      "search_ms_p50": 2.8,
+      "search_ms_p95": 4.4,
+      "rerank_ms_p50": null,
+      "rerank_ms_p95": null,
+      "hit@5_by_group": {
+        "exact/ecb": 0.722,
+        "exact/pl-bonds": 0.091,
+        "paraphrase/ecb": 0.929,
+        "paraphrase/pl-bonds": 0.0
+      }
+    },
+    {
+      "backend": "qdrant",
+      "strategy": "sparse",
+      "hit@5": 0.54,
+      "recall@5": 0.477,
+      "mrr@10": 0.469,
+      "doc_hit@5": 0.82,
+      "search_ms_p50": 2.7,
+      "search_ms_p95": 3.1,
+      "rerank_ms_p50": null,
+      "rerank_ms_p95": null,
+      "hit@5_by_group": {
+        "exact/ecb": 0.722,
+        "exact/pl-bonds": 0.091,
+        "paraphrase/ecb": 0.929,
+        "paraphrase/pl-bonds": 0.0
+      }
+    },
+    {
+      "backend": "qdrant",
+      "strategy": "hybrid",
+      "hit@5": 0.62,
+      "recall@5": 0.527,
+      "mrr@10": 0.476,
+      "doc_hit@5": 0.8,
+      "search_ms_p50": 5.1,
+      "search_ms_p95": 5.9,
+      "rerank_ms_p50": null,
+      "rerank_ms_p95": null,
+      "hit@5_by_group": {
+        "exact/ecb": 0.833,
+        "exact/pl-bonds": 0.182,
+        "paraphrase/ecb": 1.0,
+        "paraphrase/pl-bonds": 0.0
+      }
+    },
+    {
+      "backend": "qdrant",
+      "strategy": "hybrid_rerank",
+      "hit@5": 0.66,
+      "recall@5": 0.6,
+      "mrr@10": 0.564,
+      "doc_hit@5": 0.82,
+      "search_ms_p50": 12.1,
+      "search_ms_p95": 15.6,
+      "rerank_ms_p50": 58.4,
+      "rerank_ms_p95": 80.1,
+      "hit@5_by_group": {
+        "exact/ecb": 0.889,
+        "exact/pl-bonds": 0.364,
+        "paraphrase/ecb": 0.929,
+        "paraphrase/pl-bonds": 0.0
+      }
+    }
+  ]
+}
