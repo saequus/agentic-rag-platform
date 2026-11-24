@@ -23,6 +23,8 @@ WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/src /app/src
+# SQL migrations, so `python -m agentic_rag_platform.ingest.migrate` works in the container.
+COPY --chown=app:app migrations /app/migrations
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

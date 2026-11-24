@@ -7,16 +7,17 @@ and a Helm chart.
 
 This repo is the portfolio project for a Senior AI Platform Engineer
 (Generative & Agentic AI) role. The rule is simple: **claim only what you can
-demo**. The 20-day roadmap below is the build plan; Day 1 is what runs today.
+demo**. The 20-day roadmap below is the build plan; Days 1–4 are what runs today.
 
 Default LLM provider is **xAI Grok** via the official [`xai-sdk`](https://pypi.org/project/xai-sdk/)
 (`grok-4.7`). OpenAI and Anthropic adapters are included so their tool-calling
 and structured-output APIs can be learned and compared — see
 [docs/learning-notes.md](docs/learning-notes.md).
 
-## What works today (Days 1–3 + OpenTelemetry lab)
+## What works today (Days 1–4 + OpenTelemetry lab)
 
-- FastAPI app with `GET /health`, `POST /chat`, `POST /ingest`, `POST /search`
+- FastAPI app with `GET /health`, `POST /chat` (LangGraph agent), `POST /chat/stream`
+  (SSE), `POST /chat/resume`, `POST /chat/loop` (Day 1 loop), `POST /ingest`, `POST /search`
 - Provider interface (`Protocol`) with **xAI as default**, plus OpenAI and
   Anthropic official-SDK adapters, selected by `LLM_PROVIDER`
 - Tool-calling loop with a `get_fx_rate(base, quote)` tool (NBP API, Frankfurter
@@ -50,6 +51,13 @@ and structured-output APIs can be learned and compared — see
   `RETRIEVAL_STRATEGY` / `RETRIEVAL_BACKEND` or per `/search` request.
 - `make eval` — 50 labelled questions, hit@5 / recall@5 / MRR@10 per strategy
   and backend ([docs/eval-results.md](docs/eval-results.md))
+- Day 4 LangGraph agent: `route → retrieve → grade_docs → rewrite_query (max 2) →
+  generate (with [n] citations) → check_grounded`, plus an FX tool branch, a
+  chit-chat branch and a human-approval `interrupt()` before a write tool.
+  Postgres checkpointer (`thread_id` = conversation memory), SSE streaming of
+  node events and tokens, loop/cost guards, OTel spans per node. A Pydantic AI
+  version of retrieve → answer and a framework comparison in
+  [docs/frameworks.md](docs/frameworks.md).
 
 ## Planned architecture
 
@@ -103,12 +111,13 @@ cp .env.example .env
 uv run fastapi dev src/agentic_rag_platform/main.py --port 8000
 ```
 
-Health check and a chat turn:
+Health check and a chat turn with the Day 1 tool loop (the LangGraph agent
+at `POST /chat` is described in [Day 4](#day-4-langgraph-agent)):
 
 ```bash
 curl -s http://127.0.0.1:8000/health | jq
 
-curl -s http://127.0.0.1:8000/chat \
+curl -s http://127.0.0.1:8000/chat/loop \
   -H 'content-type: application/json' \
   -d '{"message":"What is the mid rate of 1 USD in PLN today? Cite your source."}' | jq
 ```
@@ -146,9 +155,11 @@ curl -s http://127.0.0.1:8000/health
 ```
 
 Postgres with pgvector is included for ingestion. After the first
-`docker compose up`, run `DATABASE_URL=postgresql://rag:rag@localhost:5432/rag make db-init`
-against the published port (or rely on a local Postgres.app database — see
-below). A Langfuse service is left commented in `docker-compose.yml` (Day 6).
+`docker compose up`, run `make db-init-docker`. It applies every migration
+inside the API container against `postgres:5432`. Don't run `make db-init`
+against `localhost:5432` for the container database: if Postgres.app is also
+running on the Mac, it owns port 5432 and the migration lands there instead.
+That is the "column c.content_tsv does not exist" error. A Langfuse service is left commented in `docker-compose.yml` (Day 6).
 OpenTelemetry Collector + Jaeger are available with `--profile otel`
 (see [docs/otel-notes.md](docs/otel-notes.md)).
 
@@ -258,6 +269,117 @@ Results (50 questions, e5-base, CPU; full table and method in
 CI on `main` and on pull requests runs ruff, mypy and pytest only. No secrets
 are required and no provider APIs are contacted.
 
+### Day 4: LangGraph agent
+
+```mermaid
+flowchart LR
+    S((start)) --> route
+    route -->|retrieve| retrieve --> grade_docs
+    grade_docs -->|relevant| generate --> check_grounded
+    grade_docs -->|none, rewrites < 2| rewrite_query --> retrieve
+    grade_docs -->|none, rewrites = 2| fallback
+    check_grounded -->|grounded| finalize
+    check_grounded -->|not grounded| fallback
+    route -->|tool: get_fx_rate| tool_call --> finalize
+    route -->|tool: save_note| approval{{"approval<br/>interrupt()"}} --> finalize
+    route -->|chitchat| chitchat --> finalize
+    fallback --> finalize --> E((end))
+```
+
+(`make agent-graph` prints the compiled graph as Mermaid.)
+
+- **Nodes** live in `graph/nodes.py`. `route`, `grade_docs`, `rewrite_query`
+  and `check_grounded` use **structured outputs** (`RouteDecision`,
+  `DocGrades`, `RewrittenQuery`, `GroundingVerdict`). `retrieve` calls the Day 3
+  `Retriever`, so strategy and backend follow `RETRIEVAL_STRATEGY` /
+  `RETRIEVAL_BACKEND` and can be set per request.
+- **Citations.** `generate` cites with `[n]` markers. They are mapped back to
+  `doc_id` / `chunk_no` / `page`, and markers for sources that were not graded
+  relevant are dropped. An answer with no valid citation fails `check_grounded`
+  without an extra LLM call.
+- **Loop and cost guards.** These are `recursion_limit` (`AGENT_RECURSION_LIMIT=25`),
+  `AGENT_MAX_REWRITES=2`, a per-turn LLM-call budget kept in graph state
+  (`AGENT_MAX_LLM_CALLS=10`), detection of repeated queries, a timeout on every
+  LLM call (`AGENT_NODE_TIMEOUT_SECONDS`), and an "I don't know" fallback that
+  records the reason in `fallback_reason`.
+- **Memory.** Short-term memory is the thread state, stored in Postgres by
+  `langgraph-checkpoint-postgres` and keyed by `thread_id`. The last
+  `AGENT_HISTORY_TURNS` turns go into the prompts, so a follow-up like "A w
+  drugim okresie?" works. Threads are tenant-scoped: another tenant gets a 403
+  or 404.
+- **Human in the loop.** `save_note` is a stub write tool. The `approval` node
+  calls `interrupt()`, the checkpoint is saved, and `/chat` returns
+  `status: "interrupted"` with `pending_approval`. Then `POST /chat/resume` with
+  `{"thread_id", "approved"}` runs the tool, or doesn't. The approval survives an
+  API restart, and the integration test proves it.
+- **Streaming.** `POST /chat/stream` sends these SSE events: `start`, `node` (one
+  per node, with metadata and no passage text), `token` (text deltas from xAI
+  `chat.stream()`), `interrupt` and `done`. Tokens are streamed before
+  `check_grounded`, so render the `done` event as the final answer. It carries
+  the fallback if grounding failed.
+- **Tracing.** Spans are `invoke_agent finance_assistant` (with
+  `gen_ai.conversation.id = thread_id`), then `node <name>` for each node, then
+  the existing `chat`, `retrieval`, `embeddings`, `rerank` and `execute_tool`
+  spans. Node spans carry only counts, the route and booleans. Content is never
+  recorded. An interrupt is not marked as an error.
+- **Checkpoint tables** (`checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
+  `checkpoint_migrations`) are created by `AsyncPostgresSaver.setup()` when the
+  API starts. LangGraph versions that schema itself, so there is no
+  `migrations/003_*.sql`. If Postgres is unreachable, the API logs a warning and
+  uses in-memory checkpoints. Every response reports `checkpointer`.
+- The Day 1 tool loop moved to `POST /chat/loop`.
+
+#### Run it with docker compose (Mac)
+
+```bash
+git checkout feat/day4-langgraph-agent && git pull
+docker compose --profile otel up -d --build      # api, postgres, qdrant, collector, jaeger
+# Apply migrations to the *container* database (postgres:5432 inside the
+# compose network, which is not the DATABASE_URL in your .env):
+make db-init-docker                              # = docker compose exec api python -m agentic_rag_platform.ingest.migrate
+make db-check-docker                             # chunks.content_tsv + checkpoint tables listed
+# Equivalent for one file without the API container:
+#   docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < migrations/002_fulltext.sql
+```
+
+Inside containers, use service names, not `127.0.0.1`. The API reaches
+`postgres:5432`, `qdrant:6333` and `otel-collector:4318`. Compose sets these, and
+`DOCKER_OTEL_EXPORTER_OTLP_ENDPOINT` overrides the OTLP endpoint for the
+container only, so `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in `.env`
+stays correct for `uv run` on the host.
+
+```bash
+# 1. A question over the documents (new thread; keep the thread_id it returns)
+curl -s http://127.0.0.1:8000/chat -H 'content-type: application/json' -d '{
+  "message": "Jakie jest oprocentowanie obligacji EDO1136 w pierwszym okresie odsetkowym?",
+  "thread_id": "demo-1", "strategy": "hybrid_rerank", "backend": "pgvector"}' \
+  | jq '{status, answer, citations: [.citations[] | .source], grounded, steps, llm_calls}'
+
+# 2. Follow-up on the same thread, streamed (-N disables curl buffering)
+curl -sN http://127.0.0.1:8000/chat/stream -H 'content-type: application/json' -d '{
+  "message": "A w drugim okresie?", "thread_id": "demo-1"}'
+
+# 3. Write action -> interrupt -> approve
+curl -s http://127.0.0.1:8000/chat -H 'content-type: application/json' -d '{
+  "message": "Save a note titled EDO: check the EDO1136 margin next month", "thread_id": "demo-2"}' \
+  | jq '{status, pending_approval}'
+curl -s http://127.0.0.1:8000/chat/resume -H 'content-type: application/json' -d '{
+  "thread_id": "demo-2", "approved": true}' | jq '{status, answer}'
+
+# Thread memory and any pending approval
+curl -s http://127.0.0.1:8000/chat/demo-1 | jq
+```
+
+Open Jaeger at http://127.0.0.1:16686, pick service `agentic-rag-platform` and
+look for `invoke_agent finance_assistant`.
+
+Pydantic AI version (xAI through `pydantic_ai.models.xai`):
+
+```bash
+uv run python -m agentic_rag_platform.agent.pydantic_ai_agent "Jakie jest oprocentowanie EDO1136?"
+```
+
+
 ## Switching providers
 
 ```bash
@@ -280,12 +402,15 @@ LLM_PROVIDER=anthropic      ANTHROPIC_API_KEY=...  ANTHROPIC_MODEL=claude-sonnet
 
 ```
 src/agentic_rag_platform/
-  main.py                 FastAPI app: /health, /chat, /ingest, /search
+  main.py                 FastAPI app: /health, /chat/loop, /ingest, /search + agent router
+  deps.py                 shared settings / provider dependencies
   settings.py             pydantic-settings
   schemas.py              Answer, ChatRequest, Message, ToolCall
   providers/              xAI (default), OpenAI, Anthropic + factory
-  tools/                  get_fx_rate + registry
-  agent/loop.py           tool loop + structured final answer
+  tools/                  get_fx_rate + registry, save_note (write stub, approval only)
+  agent/loop.py           Day 1 tool loop + structured final answer (/chat/loop)
+  agent/pydantic_ai_agent.py  Day 4: retrieve -> answer in Pydantic AI
+  graph/                  Day 4: LangGraph state, nodes, builder, checkpointer, runner, routes
   ingest/                 Day 2: PDF load, chunker, embedders, pgvector store
   retrieval/              Day 3: BM25 tokenizer, RRF, pgvector/Qdrant search, reranker
 migrations/001_init.sql   documents + chunks + HNSW index
@@ -300,6 +425,7 @@ scripts/build_eval_set.py relevance labels from seeds (make eval-labels)
 scripts/eval_retrieval.py hit@5 / recall@5 / MRR@10 per strategy (make eval)
 docs/learning-notes.md    vendor API comparison with doc links
 docs/retrieval-notes.md   chunking, embeddings, xAI embeddings check, bench numbers
+docs/frameworks.md        LangGraph vs Pydantic AI vs plain loop (+ LlamaIndex), interview notes
 postman/                  Collection v2.1 + local environment for the API
 ```
 
@@ -308,7 +434,7 @@ postman/                  Collection v2.1 + local environment for the API
 - [x] **Day 1** — LLM gateway, provider interface, tool calling, structured output, CI
 - [x] **Day 2** — Ingestion, chunking, embeddings, pgvector
 - [x] **Day 3** — Hybrid search, Qdrant, reranking
-- [ ] **Day 4** — LangGraph agents (LangChain / LlamaIndex / Pydantic AI trade-offs)
+- [x] **Day 4** — LangGraph agents (LangChain / LlamaIndex / Pydantic AI trade-offs)
 - [ ] **Day 5** — MCP server and client
 - [ ] **Day 6** — Observability: Langfuse, prompt versioning, OpenTelemetry
 - [ ] **Day 7** — Evals: Ragas, DeepEval, golden set, eval gate in CI

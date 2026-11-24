@@ -113,3 +113,25 @@ any OTLP collector. For an on-prem Lenovo-style customer, emit OTel from the
 platform and let the customer choose the backend.
 
 Day 6 will wire Langfuse as one such backend and add prompt versioning.
+
+## Day 4: LangGraph agent spans
+
+```
+POST /chat                                   (FastAPI server span)
+└─ invoke_agent finance_assistant            gen_ai.operation.name=invoke_agent, gen_ai.conversation.id=<thread_id>,
+   │                                         langgraph.graph=rag_agent, agent.llm_calls, agent.steps
+   ├─ node route        └─ chat <model>      (structured output: RouteDecision)
+   ├─ node retrieve     └─ retrieval ─ embeddings / rerank / psycopg
+   ├─ node grade_docs   └─ chat <model>      (DocGrades)
+   ├─ node generate     └─ chat <model>      gen_ai.request.stream=true
+   ├─ node check_grounded └─ chat <model>    (GroundingVerdict)
+   ├─ node tool_call    └─ execute_tool get_fx_rate ─ httpx
+   ├─ node approval     langgraph.interrupted=true (status not ERROR: interrupt is control flow)
+   └─ node finalize
+```
+
+Node spans carry only metadata (`langgraph.node`, `agent.route`,
+`agent.rewrites`, `agent.docs.count`, `agent.relevant.count`, `agent.grounded`,
+`agent.fallback_reason`). Questions, passages and answers are never recorded,
+whatever `OTEL_REDACT_CONTENT` says. A test checks that a PESEL-like string in
+the question doesn't appear on any span.

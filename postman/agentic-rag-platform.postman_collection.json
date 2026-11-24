@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a7c4e2b1-6d8f-4c91-9e3a-2b5d8f01c4a6",
     "name": "agentic-rag-platform",
-    "description": "Example requests for the local [agentic-rag-platform](https://github.com/saequus/agentic-rag-platform) API.\n\nStart the API from the repo root:\n\n    uv run fastapi dev src/agentic_rag_platform/main.py --port 8000\n\nInteractive OpenAPI docs: [http://localhost:8000/docs](http://localhost:8000/docs)\n\nMachine-readable OpenAPI schema: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)\n\nSelect the **local** environment (`baseUrl=http://localhost:8000`, `tenantId=default`). Collection variables have the same defaults and also define `corpusPath` and `samplePdfPath`.\n\nEndpoints covered: `GET /health`, `POST /chat`, `POST /ingest`, `POST /search`.\n\nNotes:\n\n- There is no request-body field to override the LLM provider. The running process uses `LLM_PROVIDER` from `.env` (`xai` by default, or `openai` / `anthropic`). Restart the API after changing it.\n- Search uses `k` (1–100), not `top_k`. Tenant scoping is `tenant_id`.\n- `POST /ingest` resolves `source_path` on the API host. The \"Ingest corpus\" request embeds every PDF under `data/raw` and can take several minutes — prefer the single-file request unless you intend a full ingest.\n- Example responses are illustrative (from unit tests and the README), not live captures.\n",
+    "description": "Example requests for the local [agentic-rag-platform](https://github.com/saequus/agentic-rag-platform) API.\n\nStart the API from the repo root:\n\n    uv run fastapi dev src/agentic_rag_platform/main.py --port 8000\n\nInteractive OpenAPI docs: [http://localhost:8000/docs](http://localhost:8000/docs)\n\nMachine-readable OpenAPI schema: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)\n\nSelect the **local** environment (`baseUrl=http://localhost:8000`, `tenantId=default`). Collection variables have the same defaults and also define `corpusPath` and `samplePdfPath`.\n\nEndpoints covered: `GET /health`, `POST /chat`, `POST /chat/stream`, `POST /chat/resume`, `GET /chat/{thread_id}` (Day 4 agent), `POST /chat/loop` (Day 1 loop), `POST /ingest`, `POST /search`.\n\nNotes:\n\n- There is no request-body field to override the LLM provider. The running process uses `LLM_PROVIDER` from `.env` (`xai` by default, or `openai` / `anthropic`). Restart the API after changing it.\n- Search uses `k` (1–100), not `top_k`. Tenant scoping is `tenant_id`.\n- `POST /ingest` resolves `source_path` on the API host. The \"Ingest corpus\" request embeds every PDF under `data/raw` and can take several minutes — prefer the single-file request unless you intend a full ingest.\n- Example responses are illustrative (from unit tests and the README), not live captures.\n",
     "schema": "https://schema.postman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -80,8 +80,357 @@
       ]
     },
     {
-      "name": "Chat",
-      "description": "Structured chat via `POST /chat`. The body is `{ message, history? }`. Provider override is not supported on the request; use `LLM_PROVIDER`.",
+      "name": "Agent (Day 4, LangGraph)",
+      "description": "LangGraph agent with Postgres checkpoints (`thread_id` memory), SSE streaming and a human-approval interrupt before the `save_note` write tool. See README 'Day 4: LangGraph agent'.",
+      "item": [
+        {
+          "name": "Ask over documents (new thread)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Agent response shape', function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.status).to.be.oneOf(['completed', 'interrupted']);",
+                  "  pm.expect(b).to.have.property('thread_id');",
+                  "  pm.expect(b.citations).to.be.an('array');",
+                  "  pm.expect(b.steps).to.include('route');",
+                  "  pm.collectionVariables.set('threadId', b.thread_id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Runs the LangGraph agent: route -> retrieve -> grade_docs -> (rewrite_query) -> generate -> check_grounded. `thread_id` is the conversation memory key; omit it to get a new one in the response. `strategy` / `backend` are optional (default RETRIEVAL_STRATEGY / RETRIEVAL_BACKEND).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Jakie jest oprocentowanie obligacji EDO1136 w pierwszym okresie odsetkowym?\",\n  \"thread_id\": \"{{threadId}}\",\n  \"tenant_id\": \"{{tenantId}}\",\n  \"strategy\": \"hybrid_rerank\",\n  \"backend\": \"pgvector\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Follow-up on the same thread",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Same thread', function () {",
+                  "  pm.expect(pm.response.json().thread_id).to.eql(pm.collectionVariables.get('threadId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Uses thread memory from the checkpointer: the previous turn is in the prompt, so the follow-up resolves to EDO1136.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"A w drugim okresie?\",\n  \"thread_id\": \"{{threadId}}\",\n  \"tenant_id\": \"{{tenantId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Stream (SSE): node events + tokens",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('SSE content type', function () {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+                  "});",
+                  "pm.test('Ends with done', function () {",
+                  "  pm.expect(pm.response.text()).to.include('event: done');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat/stream",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat",
+                "stream"
+              ]
+            },
+            "description": "Server-Sent Events: `start`, `node` (one per graph node, metadata only), `token` (text deltas), `interrupt`, `done` (final response; render this one: it is the fallback if grounding failed). In Postman the events appear in the response pane as they arrive.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What did the ECB say about inflation in 2026?\",\n  \"thread_id\": \"{{threadId}}-stream\",\n  \"tenant_id\": \"{{tenantId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Write action -> approval interrupt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Interrupted for approval', function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.status).to.eql('interrupted');",
+                  "  pm.expect(b.pending_approval.tool).to.eql('save_note');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "The router picks the `save_note` write tool. The `approval` node calls `interrupt()`: the response has `status: interrupted` and `pending_approval` (tool + arguments). Nothing is written until /chat/resume approves.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Save a note titled EDO: check the EDO1136 margin next month\",\n  \"thread_id\": \"{{approvalThreadId}}\",\n  \"tenant_id\": \"{{tenantId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resume: approve",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Completed', function () {",
+                  "  pm.expect(pm.response.json().status).to.eql('completed');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat/resume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat",
+                "resume"
+              ]
+            },
+            "description": "Resumes the interrupted thread with `Command(resume={approved: true})`. The approval node re-runs from the top, `interrupt()` returns the decision, and the note is saved. A second resume returns 409.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{approvalThreadId}}\",\n  \"approved\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resume: reject (with comment)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409 (nothing pending)', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 409]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat/resume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat",
+                "resume"
+              ]
+            },
+            "description": "Rejecting path. Run 'Write action -> approval interrupt' again first (a thread can only be resumed while an approval is pending; otherwise 409).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{approvalThreadId}}\",\n  \"approved\": false,\n  \"comment\": \"not now\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Thread memory and pending approval",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Has messages', function () {",
+                  "  pm.expect(pm.response.json().messages).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chat/{{threadId}}?tenant_id={{tenantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat",
+                "{{threadId}}"
+              ],
+              "query": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            },
+            "description": "Returns the thread's messages (short-term memory) and any pending approval. Another tenant gets 404."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Chat (Day 1 loop)",
+      "description": "Day 1 tool-calling loop, now at `POST /chat/loop` (the LangGraph agent took `POST /chat` on Day 4). The body is `{ message, history? }`. Provider override is not supported on the request; use `LLM_PROVIDER`.",
       "item": [
         {
           "name": "Plain question",
@@ -129,12 +478,13 @@
               }
             },
             "url": {
-              "raw": "{{baseUrl}}/chat",
+              "raw": "{{baseUrl}}/chat/loop",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "chat"
+                "chat",
+                "loop"
               ]
             },
             "description": "A plain question that should not need a tool. The response is a structured `Answer` (`answer`, `citations`, `confidence`) plus `provider`, `model`, and `tool_calls`."
@@ -160,12 +510,13 @@
                   }
                 },
                 "url": {
-                  "raw": "{{baseUrl}}/chat",
+                  "raw": "{{baseUrl}}/chat/loop",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
-                    "chat"
+                    "chat",
+                    "loop"
                   ]
                 },
                 "description": "A plain question that should not need a tool. The response is a structured `Answer` (`answer`, `citations`, `confidence`) plus `provider`, `model`, and `tool_calls`."
@@ -241,12 +592,13 @@
               }
             },
             "url": {
-              "raw": "{{baseUrl}}/chat",
+              "raw": "{{baseUrl}}/chat/loop",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "chat"
+                "chat",
+                "loop"
               ]
             },
             "description": "Prompts the agent to call the `get_fx_rate` tool (NBP mid rate, Frankfurter fallback). Expect `tool_calls` to include `get_fx_rate` with `base=EUR` and `quote=PLN` when the model cooperates."
@@ -272,12 +624,13 @@
                   }
                 },
                 "url": {
-                  "raw": "{{baseUrl}}/chat",
+                  "raw": "{{baseUrl}}/chat/loop",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
-                    "chat"
+                    "chat",
+                    "loop"
                   ]
                 },
                 "description": "Prompts the agent to call the `get_fx_rate` tool (NBP mid rate, Frankfurter fallback). Expect `tool_calls` to include `get_fx_rate` with `base=EUR` and `quote=PLN` when the model cooperates."
@@ -341,12 +694,13 @@
               }
             },
             "url": {
-              "raw": "{{baseUrl}}/chat",
+              "raw": "{{baseUrl}}/chat/loop",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "chat"
+                "chat",
+                "loop"
               ]
             },
             "description": "Same `/chat` endpoint with optional `history` turns (`user` / `assistant` / `system`). There is no request-body field to override the LLM provider; set `LLM_PROVIDER` (xai, openai, or anthropic) in `.env` and restart the API."
@@ -372,12 +726,13 @@
                   }
                 },
                 "url": {
-                  "raw": "{{baseUrl}}/chat",
+                  "raw": "{{baseUrl}}/chat/loop",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
-                    "chat"
+                    "chat",
+                    "loop"
                   ]
                 },
                 "description": "Same `/chat` endpoint with optional `history` turns (`user` / `assistant` / `system`). There is no request-body field to override the LLM provider; set `LLM_PROVIDER` (xai, openai, or anthropic) in `.env` and restart the API."
@@ -1002,6 +1357,16 @@
       "key": "samplePdfPath",
       "value": "data/raw/ecb-eb202601.en.pdf",
       "description": "A single ECB bulletin already present in the Day 2 corpus."
+    },
+    {
+      "key": "threadId",
+      "value": "postman-demo-1",
+      "description": "Agent thread id (set from the last /chat response)."
+    },
+    {
+      "key": "approvalThreadId",
+      "value": "postman-approval-1",
+      "description": "Thread used for the approval / resume demo."
     }
   ]
 }
